@@ -12,7 +12,7 @@ window.SECURITY = {
     MAX_ATTEMPTS: 5,
     COOLDOWN_MS: 5 * 60 * 1000 // 5 Minutes
 };
-
+window.auth = {
     async hash(str) {
         const msgBuffer = new TextEncoder().encode(str);
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
