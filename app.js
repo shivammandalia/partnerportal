@@ -12,6 +12,7 @@ window.SECURITY = {
     MAX_ATTEMPTS: 5,
     COOLDOWN_MS: 5 * 60 * 1000 // 5 Minutes
 };
+
 window.auth = {
     async hash(str) {
         const msgBuffer = new TextEncoder().encode(str);
@@ -118,7 +119,7 @@ window.auth = {
         lucide.createIcons();
     },
 
-    async checkSession() {
+    checkSession() {
         const session = JSON.parse(localStorage.getItem('auth_session'));
         if (session && session.user) {
             console.log('[AUTH] Local session restored:', session.user);
@@ -599,7 +600,7 @@ window.ui = {
     },
 
     // ── MODALS & SUBMITS ─────────────────────────────────────────────────────
-    openModal(type, d = {}) {
+    async openModal(type, d = {}) {
         const o = document.getElementById('modal-overlay'), b = document.getElementById('modal-body'), t = document.getElementById('modal-title');
         o.classList.remove('hidden'); b.innerHTML = '';
         const isAdd = type.endsWith('-add'), isEdit = type.endsWith('-edit'), base = type.split('-')[0];
@@ -607,16 +608,23 @@ window.ui = {
 
         if (['sale','purchase','expense'].includes(base)) {
             t.textContent = (isEdit?'Edit ':'New ') + base.charAt(0).toUpperCase() + base.slice(1);
-            const compatibleLeds = window.db.getCompatibleLedgers(base);
-            const leds = compatibleLeds.map(l => `<option value="${l.id}" ${d.ledgerId===l.id?'selected':''}>${l.name}</option>`).join('');
-            const accs = window.db.state.accounts.map(a => `<option value="${a.id}" ${d.accountId===a.id?'selected':''}>${a.name}</option>`).join('');
+            const leds = (await window.db.getLedgers()).map(l => `<option value="${l.id}" ${d.ledger_id===l.id?'selected':''}>${l.name}</option>`).join('');
+            const accs = (await window.db.getAccounts()).map(a => `<option value="${a.id}" ${d.account_id===a.id?'selected':''}>${a.name}</option>`).join('');
             
             b.innerHTML = `
                 <div class="form-group"><label>Date *</label><input type="date" id="tx-date" value="${d.date||today}"></div>
-                <div class="form-group"><label>Amount *</label><input type="number" id="tx-amt" value="${d.amount||''}        } else if (base === 'ledger') {
+                <div class="form-group"><label>Amount *</label><input type="number" id="tx-amt" value="${d.amount||0}"></div>
+                <div class="form-group"><label>Ledger / Party *</label><select id="tx-led">${leds}</select></div>
+                <div class="form-group"><label>Payment Account *</label><select id="tx-acc">${accs}</select></div>
+                <div class="form-group"><label>Notes</label><textarea id="tx-notes" placeholder="Optional notes...">${d.notes||''}</textarea></div>
+                <div class="modal-actions">
+                    <button class="btn-cancel" onclick="ui.closeModal()">Cancel</button>
+                    <button class="btn-primary ${base}" onclick="ui.submitTx('${base}', '${d.id||''}')">✓ Confirm ${base}</button>
+                </div>`;
+        } else if (base === 'ledger') {
             t.textContent = isEdit?'Edit Ledger':'Create Ledger';
-            const leds = await window.db.getLedgers();
-            const data = isEdit ? leds.find(l => l.id === d.id) : d;
+            const ledsList = await window.db.getLedgers();
+            const data = isEdit ? ledsList.find(l => l.id === d.id) : d;
             const groups = await window.db.getGroups();
             const grps = groups.map(g => `<option value="${g.id}" ${data.group_id===g.id?'selected':''}>${g.name} (${g.nature})</option>`).join('');
             b.innerHTML = `
@@ -666,17 +674,6 @@ window.ui = {
                 <div class="modal-actions">
                     <button class="btn-cancel" onclick="ui.closeModal()">Cancel</button>
                     <button class="btn-primary" onclick="ui.submitSettlement('${fromId}', '${toId}')">Settle Now</button>
-                </div>`;
-        } else if (base === 'delete') {
-            t.textContent = 'Confirm Deletion';
-            b.innerHTML = `
-                <div class="alert v-red">Are you sure? This action cannot be undone.</div>
-                <div class="modal-actions">
-                    <button class="btn-cancel" onclick="ui.closeModal()">Cancel</button>
-                    <button class="btn-primary" style="background:var(--rd)" onclick="ui.confirmDelete('${d.id}', '${d.type}')">Delete Permanently</button>
-                </div>`;
-        }
-"ui.submitPartnerTx('${base}', '${d.id||''}')">✓ Confirm ${base}</button>
                 </div>`;
         } else if (base === 'delete') {
             t.textContent = 'Confirm Deletion';
@@ -744,11 +741,9 @@ window.ui = {
         this.closeModal(); await this.nav(this.page);
     },
 
-    async confirmDelete(id, type) {
-        if (type === 'transaction') await window.db.deleteTx(id);
-        else if (type === 'ledger') await window.db.deleteLedger(id);
+    async confirmDeleteMaster(type, id) {
+        if (type === 'ledger') await window.db.deleteLedger(id);
         else if (type === 'account') await window.db.deleteAccount(id);
-        
         this.closeModal(); await this.nav(this.page);
         this.showToast('Record deleted');
     },
@@ -765,8 +760,7 @@ window.ui = {
         await window.db.addPartnerTx(d);
         this.closeModal(); await this.nav(this.page);
         this.showToast('Settled Successfully');
-    }
-
+    },
 
     showToast(m, t='success') {
         const s = document.getElementById('toast-stack'); if(!s) return;
@@ -906,7 +900,22 @@ window.ui = {
         <div class="report-grid">
             <div class="report-card"><h4>Total Sales</h4><div class="val v-green">${this.fmt(s.sales)}</div></div>
             <div class="report-card"><h4>Purchases</h4><div class="val v-amber">${this.fmt(s.purchases)}</div></div>
-            <div class="report-card"><h4>Expenses</h4><div class="val v-red">${this.fmt(s.expenses)}</div    async renderPartners(c) {
+            <div class="report-card"><h4>Expenses</h4><div class="val v-red">${this.fmt(s.expenses)}</div></div>
+            <div class="report-card" style="border-left:4px solid var(--v-teal)"><h4>Net Business Profit</h4><div class="val v-teal">${this.fmt(s.netProfit)}</div></div>
+        </div>`;
+    },
+
+    async renderPartnerReport(v) {
+        const p1 = await window.db.getPartnerStats(window.db.settings.p1Name, this.filter);
+        const p2 = await window.db.getPartnerStats(window.db.settings.p2Name, this.filter);
+        v.innerHTML = `
+        <div class="report-grid">
+            <div class="report-card"><h4>${p1.name} Share</h4><div class="val">${this.fmt(p1.earned)}</div></div>
+            <div class="report-card"><h4>${p2.name} Share</h4><div class="val">${this.fmt(p2.earned)}</div></div>
+        </div>`;
+    },
+
+    async renderPartners(c) {
         const p1 = await window.db.getPartnerStats(window.db.settings.p1Name, this.filter);
         const p2 = await window.db.getPartnerStats(window.db.settings.p2Name, this.filter);
         
@@ -1004,29 +1013,6 @@ window.ui = {
         <div class="report-section" style="margin-top:3rem">
             <h3 style="margin-bottom:1rem">Settlement History</h3>
             ${await this.renderSettlementHistory()}
-        </div>`;
-    },
-          </div>
-                        <span class="status-pill ${statusClass}">${sp > 1 ? `Pay ${this.fmt(sp)}` : (sp < -1 ? `Receive ${this.fmt(Math.abs(sp))}` : 'Settled')}</span>
-                    </div>
-                    <div class="partner-stat-row"><label>Profit Ratio</label><span>${p.sharePct}%</span></div>
-                    <div class="partner-stat-row"><label>Profit Share (for selected period)</label><span>${this.fmt(p.earned)}</span></div>
-                    <div class="partner-stat-row"><label>Current Cash Held</label><span>${this.fmt(p.moneyHeld)}</span></div>
-                    <div class="partner-stat-row"><label>Lifetime Capital Invested</label><span>${this.fmt(p.invested)}</span></div>
-                    <div class="partner-stat-row"><label>Lifetime Drawings</label><span>${this.fmt(p.drawings)}</span></div>
-                    <div class="partner-stat-row"><label>Lifetime Settlements (Net)</label><span>${this.fmt(p.recv - p.paid)}</span></div>
-                    
-                    <div class="partner-stat-row settlement-pos" style="margin-top:1rem; padding-top:1rem; border-top:1px dashed var(--br)">
-                        <label>Final Net Position</label>
-                        <strong class="${statusClass}">${sp > 1 ? 'Payable' : (sp < -1 ? 'Receivable' : 'Settled')}</strong>
-                    </div>
-                </div>`;
-            }).join('')}
-        </div>
-
-        <div class="report-section" style="margin-top:3rem">
-            <h3 style="margin-bottom:1rem">Settlement History</h3>
-            ${this.renderSettlementHistory()}
         </div>`;
         lucide.createIcons();
     },
