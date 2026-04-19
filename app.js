@@ -151,19 +151,23 @@ window.ui = {
     async init() {
         console.log('[UI] Initializing Portal...');
         
-        // Wait for Cloud Sync
-        await window.db.init();
-
-        // Bind Login Form
+        // 1. Bind Login Form IMMEDIATELY (So user can type while DB syncs)
         const loginForm = document.getElementById('login-form');
         if (loginForm) {
+            console.log('[UI] Binding login form...');
             loginForm.addEventListener('submit', (e) => auth.handleLogin(e));
         }
 
+        // 2. Check for existing session
         if (!auth.checkSession()) {
             console.warn('[UI] No valid session. Authentication required.');
+            // We still start db.init in background even if not logged in
+            window.db.init();
             return;
         }
+
+        // 3. Start Cloud Sync in background
+        window.db.init(); 
 
         const r = window.db.getDatePreset('this_month');
         this.filter = { from: r.from, to: r.to, preset: 'this_month' };
@@ -175,8 +179,7 @@ window.ui = {
 
         lucide.createIcons();
         
-        await window.db.init(); // Connect to Supabase
-        const loggedIn = await window.auth.checkSession();
+        const loggedIn = auth.checkSession();
         
         if (!loggedIn) {
             console.warn('[UI] No valid session. Waiting for login.');
