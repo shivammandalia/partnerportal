@@ -381,7 +381,49 @@ window.ui = {
 
     closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); },
     async deleteTx(id) { if(confirm('Delete permanently?')) { await window.db.deleteTx(id); this.nav(this.page); } },
-    renderSettings(c) { c.innerHTML = `<div class="header-action-row"><h3>Settings</h3></div><button class="btn-primary" style="background:var(--rd);width:auto;margin-top:1rem" onclick="window.auth.logout()">Secure Logout</button>`; }
+    renderSettings(c) {
+        const s = window.db.settings;
+        c.innerHTML = `
+            <div class="settings-container">
+                <div class="report-card">
+                    <h3>Enterprise Configuration</h3>
+                    <div class="form-group"><label>Business Name</label><input id="s-biz" value="${s.businessName}"></div>
+                    <div class="form-group"><label>Currency Symbol</label><input id="s-cur" value="${s.currency}"></div>
+                    <div class="p-divider"></div>
+                    <div class="form-group"><label>${s.p1Name} Name</label><input id="s-p1" value="${s.p1Name}"></div>
+                    <div class="form-group"><label>${s.p2Name} Name</label><input id="s-p2" value="${s.p2Name}"></div>
+                    <div class="form-group"><label>Profit Sharing (P1 %)</label><input type="number" id="s-pct" value="${s.profitSharing}"></div>
+                    <div class="modal-actions">
+                        <button onclick="ui.updateConfig()" class="btn-primary">Save Configuration</button>
+                    </div>
+                </div>
+                <div style="margin-top:2rem">
+                    <button class="btn-cancel" style="width:auto;background:var(--rd);color:white" onclick="window.auth.logout()">Secure Logout & Session Reset</button>
+                </div>
+            </div>`;
+    },
+
+    async updateConfig() {
+        const btn = event.target;
+        btn.disabled = true; btn.textContent = 'Saving Cloud Config...';
+        try {
+            const s = {
+                businessName: document.getElementById('s-biz').value,
+                currency: document.getElementById('s-cur').value,
+                p1Name: document.getElementById('s-p1').value,
+                p2Name: document.getElementById('s-p2').value,
+                profitSharing: parseFloat(document.getElementById('s-pct').value),
+                precision: 2
+            };
+            await window.db.saveSettings(s);
+            alert('Settings updated successfully!');
+            window.location.reload();
+        } catch(e) {
+            alert('Error saving settings: ' + e.message);
+        } finally {
+            btn.disabled = false; btn.textContent = 'Save Configuration';
+        }
+    }
 };
 
 if (window.auth.checkSession()) ui.init();

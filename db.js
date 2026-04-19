@@ -1,6 +1,6 @@
 /**
- * Partner Portal — Cloud Database Engine v7.1
- * Professional Accounting Core: Hardened Sync
+ * Partner Portal — Cloud Database Engine v7.2
+ * Professional Accounting Core: Auto-Seeding & Hardened Sync
  */
 
 window.db = {
@@ -33,16 +33,38 @@ window.db = {
         try {
             this.client = supabase.createClient(this.config.url, this.config.key);
             
-            // Sync settings
+            // 1. Sync settings
             const { data: s } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
             if (s?.value) this.settings = s.value;
 
+            // 2. Sync Master Data
             await this.syncMasterData();
+
+            // 3. Auto-Seed if empty
+            if (this.state.groups.length === 0) {
+                console.log('[DB] Database is empty. Seeding defaults...');
+                await this.seedDefaults();
+                await this.syncMasterData();
+            }
         } catch (e) {
             console.error('[DB] Init Error:', e);
         } finally {
             this.state.isLoaded = true;
         }
+    },
+
+    async seedDefaults() {
+        const groups = [
+            { name: 'Direct Income', nature: 'Income' },
+            { name: 'Indirect Income', nature: 'Income' },
+            { name: 'Direct Expenses', nature: 'Expense' },
+            { name: 'Indirect Expenses', nature: 'Expense' },
+            { name: 'Partner Capital', nature: 'Capital' },
+            { name: 'Current Assets', nature: 'Asset' },
+            { name: 'Current Liabilities', nature: 'Liability' }
+        ];
+        await this.client.from('ledger_groups').insert(groups);
+        console.log('[DB] Groups seeded.');
     },
 
     async syncMasterData() {
@@ -57,9 +79,9 @@ window.db = {
             this.state.accounts = accs || [];
             this.state.ledgers = leds || [];
             this.state.groups = grps || [];
-            console.log(`[DB] Sync Complete. Accounts: ${this.state.accounts.length}`);
+            console.log(`[DB] Sync Complete. Accounts: ${this.state.accounts.length}, Groups: ${this.state.groups.length}`);
         } catch (err) {
-            console.warn('[DB] Master Sync Failed (Tables might be missing).', err);
+            console.warn('[DB] Master Sync Failed.', err);
         }
     },
 
@@ -188,10 +210,8 @@ window.db = {
             status: 'Active',
             ...d 
         };
-        console.log('[DB] Creating Account:', payload);
         const { data, error } = await this.client.from('money_accounts').insert([payload]).select();
         if (error) throw error;
-        console.log('[DB] Account Saved:', data);
         await this.syncMasterData(); 
         return data?.[0];
     },
