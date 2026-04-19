@@ -1,6 +1,6 @@
 /**
- * Partner Portal — Application Logic v7.5
- * TOTAL RESTORATION: Defensive Rendering & Router Hardening
+ * Partner Portal — Application Logic v8.0
+ * PROFESSIONAL ACCOUNTING OVERHAUL: Strict Logic & Smart Forms
  */
 
 var db = window.db;
@@ -42,7 +42,7 @@ window.ui = {
         const r = window.db.getDatePreset('this_month');
         this.filter = { from: r.from, to: r.to, preset: 'this_month' };
 
-        // 2. Navigation Binding (Delegated & Global)
+        // 2. Navigation Binding
         document.body.onclick = (e) => {
             const btn = e.target.closest('[data-page]');
             if (btn) {
@@ -57,7 +57,7 @@ window.ui = {
             if (this.page !== h) this.nav(h);
         };
 
-        // 3. Wait for DB with Safety + Failsafe
+        // 3. Wait for DB
         let retry = 0;
         while (!window.db.state.isLoaded && retry < 15) { 
             await new Promise(r => setTimeout(r, 400)); 
@@ -72,17 +72,13 @@ window.ui = {
     async nav(pageId) {
         if (!localStorage.getItem('auth_session')) return;
         
-        console.log(`[UI] Navigating to: ${pageId}`);
         this.page = pageId;
         window.location.hash = pageId;
-        
-        // Update Sidebars (All)
         document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === pageId));
         
         const c = document.getElementById('page-container');
         if (!c) return;
         
-        // Start Loading State
         c.innerHTML = `<div class="loading-state" id="global-spinner"><div class="spinner"></div><p>Syncing Cloud Data...</p></div>`;
 
         const titles = { 
@@ -94,7 +90,6 @@ window.ui = {
         const titleEl = document.getElementById('page-title');
         if (titleEl) titleEl.textContent = titles[pageId] || pageId;
 
-        // Failsafe Spinner Cleanup
         const spinnerTimeout = setTimeout(() => {
             const s = document.getElementById('global-spinner');
             if (s) s.innerHTML = '<p class="empty-hint">Sync timed out. Retrying rendered data...</p>';
@@ -116,13 +111,10 @@ window.ui = {
                 default: c.innerHTML = `<div class="empty-state"><h3>Wait a moment...</h3><p>Page "${pageId}" is loading.</p></div>`;
             }
         } catch (e) { 
-            console.error('[UI] Nav Crash:', e);
             c.innerHTML = `<div class="empty-state"><h3>Navigation Failure</h3><p>${e.message}</p></div>`;
         } finally {
             clearTimeout(spinnerTimeout);
         }
-        
-        try { lucide.createIcons(); } catch(e) {}
     },
 
     fmt(n) { return (window.db.settings?.currency || '₹') + (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2}); },
@@ -147,7 +139,7 @@ window.ui = {
             const txs = await window.db.getAllTransactions(this.filter) || [];
             
             if (txs.length === 0 && accs.length === 0) {
-                c.innerHTML = `<div class="welcome-banner"><h2>Welcome to Partner Portal</h2><p>Start by adding your first money account.</p><button onclick="ui.openModal('account-add')" class="btn-primary">+ Add Account</button></div>`;
+                c.innerHTML = `<div class="welcome-banner"><h2>Welcome to Partner Portal</h2><p>Default accounting ledgers have been created. Start by adding your first bank account.</p><button onclick="ui.openModal('account-add')" class="btn-primary">+ Add Account</button></div>`;
                 return;
             }
 
@@ -161,84 +153,79 @@ window.ui = {
                 <div class="kpi-grid">
                     <div class="kpi-card" data-page="sales"><h3>Sales</h3><div class="v-green">${this.fmt(s.sales)}</div></div>
                     <div class="kpi-card" data-page="accounts"><h3>Liquid Cash</h3><div class="v-teal">${this.fmt(totalCash)}</div></div>
-                    <div class="kpi-card" data-page="reports"><h3>Net Profit</h3><div class="v-amber">${this.fmt(s.netProfit)}</div></div>
+                    <div class="kpi-card" data-page="reports"><h3>Profit</h3><div class="v-amber">${this.fmt(s.netProfit)}</div></div>
                 </div>
                 <div class="dist-grid" style="margin-top:2rem">
-                    <div class="chart-card"><h3>Recent Transactions</h3>
+                    <div class="chart-card"><h3>Transactions</h3>
                         <div class="activity-list">
                             ${txs.slice(0,8).map(t => `<div class="act-item"><span>${t.type}</span><strong>${this.fmt(t.amount)}</strong><em style="font-size:0.7rem;color:var(--t3)">${this.fmtDate(t.date)}</em></div>`).join('')}
-                            ${txs.length===0?'<p class="empty-hint">No recent activity.</p>':''}
+                            ${txs.length===0?'<p class="empty-hint">No activity.</p>':''}
                         </div>
                     </div>
                 </div>`;
-        } catch(e) { c.innerHTML = `<div class="empty-state">Dashboard failed: ${e.message}</div>`; }
+        } catch(e) { c.innerHTML = `<div class="empty-state">Dashboard error: ${e.message}</div>`; }
     },
 
     // ── PARTNERS ─────────────────────────────────────────────────────────────
     async renderPartners(c) {
         try {
-            const p1 = await window.db.getPartnerStats(1, this.filter) || { name: 'Partner 1', sharePct: 50, position: 0 };
-            const p2 = await window.db.getPartnerStats(2, this.filter) || { name: 'Partner 2', sharePct: 50, position: 0 };
-
+            const p1 = await window.db.getPartnerStats(1, this.filter);
+            const p2 = await window.db.getPartnerStats(2, this.filter);
             let summaryText = "Settlement is balanced.";
             if (Math.abs(p1.position) > 1) {
                 const payer = p1.position > 0 ? p1.name : p2.name;
                 const receiver = p1.position > 0 ? p2.name : p1.name;
                 summaryText = `<span class="pay-alert"><strong>${payer}</strong> should pay <strong>${receiver}</strong> ${this.fmt(Math.abs(p1.position))}</span>`;
             }
-
             c.innerHTML = `
                 <div class="settlement-summary">${summaryText} <button class="btn-primary" style="width:auto;padding:0.5rem 1rem" onclick="ui.openModal('settlement-add')">Record Transfer</button></div>
                 <div class="partners-grid">
                     ${[p1, p2].map(p => `
                         <div class="partner-card">
-                            <div class="p-header"><h3>${p.name || 'Partner'}</h3><span>${p.sharePct || 50}% Share</span></div>
+                            <div class="p-header"><h3>${p.name}</h3><span>${p.sharePct}% Share</span></div>
                             <div class="p-body">
                                 <div class="p-row"><span>Earned</span><strong>${this.fmt(p.earned)}</strong></div>
                                 <div class="p-row"><span>Investments</span><strong>${this.fmt(p.invested)}</strong></div>
                                 <div class="p-row"><span>Drawings</span><strong class="v-red">${this.fmt(p.drawings)}</strong></div>
                                 <div class="p-row highlight"><span>Money Held</span><strong>${this.fmt(p.moneyHeld)}</strong></div>
                                 <div class="p-divider"></div>
-                                <div class="p-row"><span>Final Position</span><strong class="${p.position>0?'v-red':'v-green'}">${p.position > 0 ? 'Owes' : 'Receivable'} ${this.fmt(Math.abs(p.position))}</strong></div>
+                                <div class="p-row"><span>Position</span><strong class="${p.position>0?'v-red':'v-green'}">${p.position > 0 ? 'Owes' : 'Receivable'} ${this.fmt(Math.abs(p.position))}</strong></div>
                             </div>
                         </div>
                     `).join('')}
                 </div>`;
-        } catch(e) { c.innerHTML = `<div class="empty-state">Partner logic failure: ${e.message}</div>`; }
+        } catch(e) { c.innerHTML = `<div class="empty-state">Partner error: ${e.message}</div>`; }
     },
 
     // ── MASTERS ──────────────────────────────────────────────────────────────
     async renderAccounts(c) {
         try {
-            const accs = await window.db.getAccounts() || [];
+            const accs = await window.db.getAccounts();
             c.innerHTML = `
-            <div class="header-action-row"><p>Physical Money Accounts (UPI, Bank, Cash)</p><button onclick="ui.openModal('account-add')" class="btn-primary" style="width:auto">+ Add Account</button></div>
+            <div class="header-action-row"><p>Cash & Bank Accounts</p><button onclick="ui.openModal('account-add')" class="btn-primary" style="width:auto">+ Add Account</button></div>
             <div class="accounts-grid">
                 ${(await Promise.all(accs.map(async a => {
                     const s = await window.db.getAccountStats(a.id, this.filter);
                     return `<div class="acc-full-card"><div class="afc-name">${a.name}</div><div class="afc-balance">${this.fmt(s?.balance || 0)}</div><div class="afc-tag">${a.owner_type}</div></div>`;
-                }))).join('') || '<div class="empty-state">No money accounts configured.</div>'}
+                }))).join('') || '<div class="empty-state">No money accounts.</div>'}
             </div>`;
-        } catch(e) { c.innerHTML = `Error loading accounts: ${e.message}`; }
+        } catch(e) { c.innerHTML = `Error: ${e.message}`; }
     },
 
     async renderLedgers(c) {
-        try {
-            const leds = await window.db.getLedgers() || [];
-            const grps = await window.db.getGroups() || [];
-            c.innerHTML = `<div class="header-action-row"><p>Accounting Heads</p><button onclick="ui.openModal('ledger-add')" class="btn-primary" style="width:auto">+ New Ledger</button></div>
-            <div class="ledger-table-container"><table><thead><tr><th>Name head</th><th>Group</th><th>Nature</th></tr></thead><tbody>
-            ${leds.map(l => {
-                const g = grps.find(gr => gr.id === l.group_id);
-                return `<tr><td>${l.name}</td><td>${g?.name || '—'}</td><td>${g?.nature || '—'}</td></tr>`;
-            }).join('')}
-            ${leds.length===0?'<tr><td colspan="3" class="empty-hint">No accounting ledgers found.</td></tr>':''}
-            </tbody></table></div>`;
-        } catch(e) { c.innerHTML = `Error loading ledgers: ${e.message}`; }
+        const leds = await window.db.getLedgers();
+        const grps = await window.db.getGroups();
+        c.innerHTML = `<div class="header-action-row"><p>Accounting Heads</p><button onclick="ui.openModal('ledger-add')" class="btn-primary" style="width:auto">+ New Ledger</button></div>
+        <div class="ledger-table-container"><table><thead><tr><th>Ledger Name</th><th>Group</th></tr></thead><tbody>
+        ${leds.map(l => {
+            const g = grps.find(gr => gr.id === l.group_id);
+            return `<tr><td>${l.name}</td><td>${g?.name || '—'}</td></tr>`;
+        }).join('')}
+        </tbody></table></div>`;
     },
 
     async renderGroups(c) {
-        const grps = await window.db.getGroups() || [];
+        const grps = await window.db.getGroups();
         c.innerHTML = `<div class="ledger-table-container"><table><thead><tr><th>Group Name</th><th>Nature</th></tr></thead><tbody>
         ${grps.map(g => `<tr><td>${g.name}</td><td>${g.nature}</td></tr>`).join('')}
         </tbody></table></div>`;
@@ -246,88 +233,94 @@ window.ui = {
 
     // ── TRANSACTIONS ─────────────────────────────────────────────────────────
     async renderTxs(c, type) {
-        try {
-            const txsAll = await window.db.getAllTransactions(this.filter) || [];
-            const leds = await window.db.getLedgers() || [];
-            const txs = txsAll.filter(t => t.type === type);
-            c.innerHTML = `<div class="header-action-row"><button onclick="ui.openModal('${type}-add')" class="btn-primary" style="width:auto">+ Record ${type.toUpperCase()}</button></div>
-            <div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Amount</th><th>Category</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead><tbody>
-            ${txs.map(t=>{
-                const l = leds.find(led => led.id == t.ledger_id);
-                return `<tr><td>${this.fmtDate(t.date)}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td><td>${t.notes||''}</td><td style="text-align:right"><button class="btn-icon" style="color:var(--rd)" onclick="ui.deleteTx('${t.id}')">✕</button></td></tr>`;
-            }).join('')}
-            ${txs.length===0?'<tr><td colspan="5" class="empty-hint">No transactions for this period.</td></tr>':''}
-            </tbody></table></div>`;
-        } catch(e) { c.innerHTML = `Error rendering transactions: ${e.message}`; }
+        const txsAll = await window.db.getAllTransactions(this.filter);
+        const leds = await window.db.getLedgers();
+        const txs = txsAll.filter(t => t.type === type);
+        c.innerHTML = `<div class="header-action-row"><button onclick="ui.openModal('${type}-add')" class="btn-primary" style="width:auto">+ Record ${type.toUpperCase()}</button></div>
+        <div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Amount</th><th>Ledger</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead><tbody>
+        ${txs.map(t=>{
+            const l = leds.find(led => led.id == t.ledger_id);
+            return `<tr><td>${this.fmtDate(t.date)}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td><td>${t.notes||''}</td><td style="text-align:right"><button class="btn-icon" style="color:var(--rd)" onclick="ui.deleteTx('${t.id}')">✕</button></td></tr>`;
+        }).join('')}
+        ${txs.length===0?'<tr><td colspan="5" class="empty-hint">No transactions.</td></tr>':''}
+        </tbody></table></div>`;
     },
 
     async renderAllTxs(c) {
-        try {
-            const txs = await window.db.getAllTransactions(this.filter) || [];
-            const leds = await window.db.getLedgers() || [];
-            c.innerHTML = `
-            <div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Category</th><th>Notes</th></tr></thead><tbody>
-            ${txs.map(t=>{
-                const l = leds.find(led => led.id == t.ledger_id);
-                return `<tr><td>${this.fmtDate(t.date)}</td><td style="text-transform:capitalize">${t.type}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td><td>${t.notes||''}</td></tr>`;
-            }).join('')}
-            ${txs.length===0?'<tr><td colspan="5" class="empty-hint">No transactions found in this period.</td></tr>':''}
-            </tbody></table></div>`;
-        } catch(e) { c.innerHTML = `Error rendering ledger: ${e.message}`; }
+        const txs = await window.db.getAllTransactions(this.filter);
+        const leds = await window.db.getLedgers();
+        c.innerHTML = `<div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Ledger</th></tr></thead><tbody>
+        ${txs.map(t=>{
+            const l = leds.find(led => led.id == t.ledger_id);
+            return `<tr><td>${this.fmtDate(t.date)}</td><td style="text-transform:capitalize">${t.type}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td></tr>`;
+        }).join('')}
+        </tbody></table></div>`;
     },
 
     // ── MODALS ───────────────────────────────────────────────────────────────
     async openModal(type) {
         const o = document.getElementById('modal-overlay'), b = document.getElementById('modal-body'), t = document.getElementById('modal-title');
         if (!o || !b || !t) return;
-        
         o.classList.remove('hidden'); b.innerHTML = '<div class="spinner"></div>';
         
         const base = type.split('-')[0];
-        const leds = await window.db.getCompatibleLedgers(base) || [];
-        const accs = await window.db.getAccounts() || [];
+        const leds = await window.db.getCompatibleLedgers(base);
+        const accs = await window.db.getAccounts();
 
         if (['sale', 'purchase', 'expense'].includes(base)) {
-            t.textContent = 'Record New ' + base.toUpperCase();
+            const defaultMap = { sale: 'Sales Account', purchase: 'Purchase Account', expense: 'Meta Ads' };
+            const defLed = leds.find(l => l.name === defaultMap[base]) || leds[0];
+            
+            t.textContent = 'New ' + base.toUpperCase();
             b.innerHTML = `
-                <div class="form-group"><label>Transaction Date</label><input type="date" id="f-date" value="${new Date().toISOString().split('T')[0]}"></div>
-                <div class="form-group"><label>Total Amount</label><input type="number" id="f-amt" step="0.01"></div>
-                <div class="form-group"><label>Select Category (Ledger)</label><select id="f-led">${leds.map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}</select></div>
-                <div class="form-group"><label>Money Source / Target</label><select id="f-acc">${accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}</select></div>
-                <div class="form-group"><label>Reference / Notes</label><textarea id="f-notes" placeholder="Enter transaction details..."></textarea></div>
-                <div class="modal-actions"><button onclick="ui.submitTx('${base}')" class="btn-primary">Confirm Entry</button><button onclick="ui.closeModal()" class="btn-cancel">Dismiss</button></div>`;
+                <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>Amount</label><input type="number" id="f-amt" step="0.01"></div>
+                <div class="form-group"><label>Money Account</label><select id="f-acc">${accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}</select></div>
+                <div class="form-group"><label>Ledger (Category)</label><select id="f-led">${leds.map(l=>`<option value="${l.id}" ${l.id===defLed?.id?'selected':''}>${l.name}</option>`).join('')}</select></div>
+                <div class="form-group"><label>Notes</label><textarea id="f-notes"></textarea></div>
+                <div class="modal-actions"><button onclick="ui.submitTx('${base}')" class="btn-primary">Save Entry</button></div>`;
+        } else if (base === 'account') {
+            t.textContent = 'Add Account';
+            b.innerHTML = `<div class="form-group"><label>Name</label><input id="f-name"></div>
+                <div class="form-group"><label>Opening Balance</label><input type="number" id="f-bal" value="0"></div>
+                <div class="form-group"><label>Owner</label><select id="f-own"><option value="Business">Business</option><option value="Partner1">${window.db.settings.p1Name}</option><option value="Partner2">${window.db.settings.p2Name}</option></select></div>
+                <div class="modal-actions"><button onclick="ui.submitAccount()" class="btn-primary">Create</button></div>`;
+        } else if (base === 'ledger') {
+            t.textContent = 'Add Ledger';
+            const grps = await window.db.getGroups();
+            b.innerHTML = `<div class="form-group"><label>Ledger Name</label><input id="f-name"></div>
+                <div class="form-group"><label>Group</label><select id="f-grp">${grps.map(g=>`<option value="${g.id}">${g.name}</option>`).join('')}</select></div>
+                <div class="modal-actions"><button onclick="ui.submitLedger()" class="btn-primary">Create</button></div>`;
         } else if (base === 'settlement') {
-            t.textContent = 'Partner Transfer';
-            b.innerHTML = `
-                <div class="form-group"><label>Amount</label><input type="number" id="f-amt"></div>
-                <div class="form-group"><label>From</label><select id="f-from-p"><option value="partner1">${window.db.settings?.p1Name||'P1'}</option><option value="partner2">${window.db.settings?.p2Name||'P2'}</option></select></div>
-                <div class="form-group"><label>To</label><select id="f-to-p"><option value="partner2">${window.db.settings?.p2Name||'P2'}</option><option value="partner1">${window.db.settings?.p1Name||'P1'}</option></select></div>
+            t.textContent = 'Partner Settlement';
+            b.innerHTML = `<div class="form-group"><label>Amount</label><input type="number" id="f-amt"></div>
+                <div class="form-group"><label>From Partner</label><select id="f-from-p"><option value="partner1">${window.db.settings.p1Name}</option><option value="partner2">${window.db.settings.p2Name}</option></select></div>
+                <div class="form-group"><label>To Partner</label><select id="f-to-p"><option value="partner2">${window.db.settings.p2Name}</option><option value="partner1">${window.db.settings.p1Name}</option></select></div>
                 <div class="form-group"><label>From Account</label><select id="f-from-acc">${accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}</select></div>
                 <div class="form-group"><label>To Account</label><select id="f-to-acc">${accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}</select></div>
-                <div class="modal-actions"><button onclick="ui.submitSettlement()" class="btn-primary">Confirm</button><button onclick="ui.closeModal()" class="btn-cancel">Cancel</button></div>`;
-        } else if (base === 'account') {
-            t.textContent = 'Setup Money Account';
-            b.innerHTML = `
-                <div class="form-group"><label>Account Name</label><input id="f-name" placeholder="e.g. HDFC Bank, Business UPI"></div>
-                <div class="form-group"><label>Account Type</label><select id="f-type"><option value="Bank">Bank Account</option><option value="UPI">UPI / Wallet</option><option value="Cash">Physical Cash</option></select></div>
-                <div class="form-group"><label>Opening Balance</label><input type="number" id="f-bal" value="0"></div>
-                <div class="form-group"><label>Owner / Responsibility</label><select id="f-own"><option value="Business">Business (Main)</option><option value="Partner1">${window.db.settings?.p1Name||'Partner 1'}</option><option value="Partner2">${window.db.settings?.p2Name||'Partner 2'}</option></select></div>
-                <div class="modal-actions"><button onclick="ui.submitAccount()" class="btn-primary">Create Account</button><button onclick="ui.closeModal()" class="btn-cancel">Cancel</button></div>`;
-        } else if (base === 'ledger') {
-            t.textContent = 'Create Master Ledger';
-            const categories = await window.db.getGroups() || [];
-            b.innerHTML = `<div class="form-group"><label>Ledger Name</label><input id="f-name"></div>
-                <div class="form-group"><label>Accounting Group</label><select id="f-grp">${categories.map(g=>`<option value="${g.id}">${g.name}</option>`).join('')}</select></div>
-                <div class="modal-actions"><button onclick="ui.submitLedger()" class="btn-primary">Save Ledger</button></div>`;
+                <div class="modal-actions"><button onclick="ui.submitSettlement()" class="btn-primary">Record Settlement</button></div>`;
         }
     },
 
     async submitTx(type) {
+        const amt = document.getElementById('f-amt').value;
+        const led = document.getElementById('f-led').value;
+        const acc = document.getElementById('f-acc').value;
+        if (!amt || !led || !acc) return alert('Please fill all required fields.');
         await window.db.addTx(type, { 
-            date: document.getElementById('f-date').value, amount: document.getElementById('f-amt').value, 
-            ledger_id: document.getElementById('f-led').value, account_id: document.getElementById('f-acc').value,
-            notes: document.getElementById('f-notes').value
+            date: document.getElementById('f-date').value, amount: amt, 
+            ledger_id: led, account_id: acc, notes: document.getElementById('f-notes').value
         });
+        this.closeModal(); this.nav(this.page);
+    },
+
+    async submitAccount() {
+        await window.db.addAccount({ name: document.getElementById('f-name').value, opening_balance: document.getElementById('f-bal').value, owner_type: document.getElementById('f-own').value });
+        this.closeModal(); this.nav(this.page);
+    },
+
+    async submitLedger() {
+        await window.db.addLedger({ name: document.getElementById('f-name').value, group_id: document.getElementById('f-grp').value });
         this.closeModal(); this.nav(this.page);
     },
 
@@ -340,90 +333,37 @@ window.ui = {
         this.closeModal(); this.nav('partners');
     },
 
-    async submitAccount() {
-        const btn = event.target;
-        btn.disabled = true; btn.textContent = 'Saving...';
-        try {
-            const payload = { 
-                name: document.getElementById('f-name').value, 
-                opening_balance: document.getElementById('f-bal').value, 
-                owner_type: document.getElementById('f-own').value,
-                account_type: document.getElementById('f-type').value
-            };
-            await window.db.addAccount(payload);
-            console.log('[UI] Account creation reflected.');
-            this.closeModal();
-            // Force re-render of current view + show success
-            await this.nav(this.page);
-            alert('Account created successfully!');
-        } catch(e) {
-            console.error('[UI] Account creation failed:', e);
-            alert('Failed to save account: ' + e.message);
-        } finally {
-            btn.disabled = false; btn.textContent = 'Create Account';
-        }
+    renderReports(c) {
+        window.db.getSummary(this.filter).then(s => {
+            c.innerHTML = `<div class="report-card"><h3>Profit & Loss</h3>
+                <div class="p-row"><span>Sales</span><strong class="v-green">${this.fmt(s.sales)}</strong></div>
+                <div class="p-row"><span>Direct Costs</span><strong class="v-red">${this.fmt(s.purchases)}</strong></div>
+                <div class="p-row"><span>Operating Expenses</span><strong class="v-red">${this.fmt(s.expenses)}</strong></div>
+                <div class="p-divider"></div>
+                <div class="p-row highlight"><span>Net Profit</span><strong class="v-amber">${this.fmt(s.netProfit)}</strong></div>
+            </div>`;
+        });
     },
 
-    async submitLedger() {
-        await window.db.addLedger({ name: document.getElementById('f-name').value, group_id: document.getElementById('f-grp').value });
-        this.closeModal(); this.nav(this.page);
-    },
-
-    async renderReports(c) {
-        const s = await window.db.getSummary(this.filter);
-        c.innerHTML = `<div class="report-card"><h3>Profit & Loss Statement</h3>
-            <div class="p-row"><span>Total Sales</span><strong class="v-green">${this.fmt(s.sales)}</strong></div>
-            <div class="p-row"><span>Total Costs</span><strong class="v-red">${this.fmt(s.expenses + s.purchases)}</strong></div>
-            <div class="p-divider"></div>
-            <div class="p-row highlight" style="font-size:1.2rem"><span>Net Business Profit</span><strong class="v-amber">${this.fmt(s.netProfit)}</strong></div>
-        </div>`;
-    },
-
-    closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); },
-    async deleteTx(id) { if(confirm('Delete permanently?')) { await window.db.deleteTx(id); this.nav(this.page); } },
     renderSettings(c) {
         const s = window.db.settings;
-        c.innerHTML = `
-            <div class="settings-container">
-                <div class="report-card">
-                    <h3>Enterprise Configuration</h3>
-                    <div class="form-group"><label>Business Name</label><input id="s-biz" value="${s.businessName}"></div>
-                    <div class="form-group"><label>Currency Symbol</label><input id="s-cur" value="${s.currency}"></div>
-                    <div class="p-divider"></div>
-                    <div class="form-group"><label>${s.p1Name} Name</label><input id="s-p1" value="${s.p1Name}"></div>
-                    <div class="form-group"><label>${s.p2Name} Name</label><input id="s-p2" value="${s.p2Name}"></div>
-                    <div class="form-group"><label>Profit Sharing (P1 %)</label><input type="number" id="s-pct" value="${s.profitSharing}"></div>
-                    <div class="modal-actions">
-                        <button onclick="ui.updateConfig()" class="btn-primary">Save Configuration</button>
-                    </div>
-                </div>
-                <div style="margin-top:2rem">
-                    <button class="btn-cancel" style="width:auto;background:var(--rd);color:white" onclick="window.auth.logout()">Secure Logout & Session Reset</button>
-                </div>
-            </div>`;
+        c.innerHTML = `<div class="settings-container"><div class="report-card"><h3>Config</h3>
+            <div class="form-group"><label>Biz Name</label><input id="s-biz" value="${s.businessName}"></div>
+            <div class="form-group"><label>P1 Name</label><input id="s-p1" value="${s.p1Name}"></div>
+            <div class="form-group"><label>P2 Name</label><input id="s-p2" value="${s.p2Name}"></div>
+            <div class="form-group"><label>P1 Share %</label><input type="number" id="s-pct" value="${s.profitSharing}"></div>
+            <button onclick="ui.updateConfig()" class="btn-primary">Save</button>
+        </div><button class="btn-cancel" style="margin-top:2rem" onclick="window.auth.logout()">Logout</button></div>`;
     },
 
     async updateConfig() {
-        const btn = event.target;
-        btn.disabled = true; btn.textContent = 'Saving Cloud Config...';
-        try {
-            const s = {
-                businessName: document.getElementById('s-biz').value,
-                currency: document.getElementById('s-cur').value,
-                p1Name: document.getElementById('s-p1').value,
-                p2Name: document.getElementById('s-p2').value,
-                profitSharing: parseFloat(document.getElementById('s-pct').value),
-                precision: 2
-            };
-            await window.db.saveSettings(s);
-            alert('Settings updated successfully!');
-            window.location.reload();
-        } catch(e) {
-            alert('Error saving settings: ' + e.message);
-        } finally {
-            btn.disabled = false; btn.textContent = 'Save Configuration';
-        }
-    }
+        const s = { businessName: document.getElementById('s-biz').value, p1Name: document.getElementById('s-p1').value, p2Name: document.getElementById('s-p2').value, profitSharing: parseFloat(document.getElementById('s-pct').value), currency: '₹' };
+        await window.db.saveSettings(s);
+        location.reload();
+    },
+
+    closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); },
+    async deleteTx(id) { if(confirm('Delete?')) { await window.db.deleteTx(id); this.nav(this.page); } }
 };
 
 if (window.auth.checkSession()) ui.init();
