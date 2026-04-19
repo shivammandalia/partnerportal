@@ -1,6 +1,6 @@
 /**
- * Partner Portal — Cloud Database Engine v7.0
- * Professional Accounting Core
+ * Partner Portal — Cloud Database Engine v7.1
+ * Professional Accounting Core: Hardened Sync
  */
 
 window.db = {
@@ -25,7 +25,10 @@ window.db = {
             currency: '₹', businessName: 'Partner Portal', precision: 2
         };
 
-        if (typeof supabase === 'undefined') return;
+        if (typeof supabase === 'undefined') {
+            console.error('[DB] Supabase SDK missing!');
+            return;
+        }
 
         try {
             this.client = supabase.createClient(this.config.url, this.config.key);
@@ -44,6 +47,7 @@ window.db = {
 
     async syncMasterData() {
         if (!this.client) return;
+        console.log('[DB] Syncing Master Data...');
         try {
             const [{ data: accs }, { data: leds }, { data: grps }] = await Promise.all([
                 this.client.from('money_accounts').select('*').order('name'),
@@ -53,8 +57,9 @@ window.db = {
             this.state.accounts = accs || [];
             this.state.ledgers = leds || [];
             this.state.groups = grps || [];
+            console.log(`[DB] Sync Complete. Accounts: ${this.state.accounts.length}`);
         } catch (err) {
-            console.warn('[DB] Master Sync Failed (Tables might be missing).');
+            console.warn('[DB] Master Sync Failed (Tables might be missing).', err);
         }
     },
 
@@ -176,7 +181,21 @@ window.db = {
         await this.syncMasterData();
     },
 
-    async addAccount(d) { await this.client.from('money_accounts').insert([{ id:'acc_'+Date.now(), ...d }]); await this.syncMasterData(); },
+    async addAccount(d) { 
+        if (!this.client) return;
+        const payload = { 
+            id: 'acc_' + Date.now(), 
+            status: 'Active',
+            ...d 
+        };
+        console.log('[DB] Creating Account:', payload);
+        const { data, error } = await this.client.from('money_accounts').insert([payload]).select();
+        if (error) throw error;
+        console.log('[DB] Account Saved:', data);
+        await this.syncMasterData(); 
+        return data?.[0];
+    },
+
     async addLedger(d)  { await this.client.from('ledgers').insert([{ id:'led_'+Date.now(), ...d }]); await this.syncMasterData(); },
     async deleteTx(id)   { await this.client.from('transactions').delete().eq('id', id); await this.client.from('partner_transactions').delete().eq('id', id); },
     

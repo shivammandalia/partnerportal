@@ -106,6 +106,7 @@ window.ui = {
                 case 'sales':     await this.renderTxs(c, 'sale'); break;
                 case 'purchases': await this.renderTxs(c, 'purchase'); break;
                 case 'expenses':  await this.renderTxs(c, 'expense'); break;
+                case 'ledger':    await this.renderAllTxs(c); break;
                 case 'accounts':  await this.renderAccounts(c); break;
                 case 'partners':  await this.renderPartners(c); break;
                 case 'groups':    await this.renderGroups(c); break;
@@ -247,13 +248,32 @@ window.ui = {
     async renderTxs(c, type) {
         try {
             const txsAll = await window.db.getAllTransactions(this.filter) || [];
+            const leds = await window.db.getLedgers() || [];
             const txs = txsAll.filter(t => t.type === type);
             c.innerHTML = `<div class="header-action-row"><button onclick="ui.openModal('${type}-add')" class="btn-primary" style="width:auto">+ Record ${type.toUpperCase()}</button></div>
             <div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Amount</th><th>Category</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead><tbody>
-            ${txs.map(t=>`<tr><td>${this.fmtDate(t.date)}</td><td>${this.fmt(t.amount)}</td><td>${t.ledger_id||'—'}</td><td>${t.notes||''}</td><td style="text-align:right"><button class="btn-icon" style="color:var(--rd)" onclick="ui.deleteTx('${t.id}')">✕</button></td></tr>`).join('')}
+            ${txs.map(t=>{
+                const l = leds.find(led => led.id == t.ledger_id);
+                return `<tr><td>${this.fmtDate(t.date)}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td><td>${t.notes||''}</td><td style="text-align:right"><button class="btn-icon" style="color:var(--rd)" onclick="ui.deleteTx('${t.id}')">✕</button></td></tr>`;
+            }).join('')}
             ${txs.length===0?'<tr><td colspan="5" class="empty-hint">No transactions for this period.</td></tr>':''}
             </tbody></table></div>`;
         } catch(e) { c.innerHTML = `Error rendering transactions: ${e.message}`; }
+    },
+
+    async renderAllTxs(c) {
+        try {
+            const txs = await window.db.getAllTransactions(this.filter) || [];
+            const leds = await window.db.getLedgers() || [];
+            c.innerHTML = `
+            <div class="ledger-table-container"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Category</th><th>Notes</th></tr></thead><tbody>
+            ${txs.map(t=>{
+                const l = leds.find(led => led.id == t.ledger_id);
+                return `<tr><td>${this.fmtDate(t.date)}</td><td style="text-transform:capitalize">${t.type}</td><td>${this.fmt(t.amount)}</td><td>${l?.name||'—'}</td><td>${t.notes||''}</td></tr>`;
+            }).join('')}
+            ${txs.length===0?'<tr><td colspan="5" class="empty-hint">No transactions found in this period.</td></tr>':''}
+            </tbody></table></div>`;
+        } catch(e) { c.innerHTML = `Error rendering ledger: ${e.message}`; }
     },
 
     // ── MODALS ───────────────────────────────────────────────────────────────
@@ -288,10 +308,11 @@ window.ui = {
         } else if (base === 'account') {
             t.textContent = 'Setup Money Account';
             b.innerHTML = `
-                <div class="form-group"><label>Account Name</label><input id="f-name"></div>
+                <div class="form-group"><label>Account Name</label><input id="f-name" placeholder="e.g. HDFC Bank, Business UPI"></div>
+                <div class="form-group"><label>Account Type</label><select id="f-type"><option value="Bank">Bank Account</option><option value="UPI">UPI / Wallet</option><option value="Cash">Physical Cash</option></select></div>
                 <div class="form-group"><label>Opening Balance</label><input type="number" id="f-bal" value="0"></div>
-                <div class="form-group"><label>Account Type</label><select id="f-own"><option value="Business">Business</option><option value="Partner1">${window.db.settings?.p1Name||'P1'}</option><option value="Partner2">${window.db.settings?.p2Name||'P2'}</option></select></div>
-                <div class="modal-actions"><button onclick="ui.submitAccount()" class="btn-primary">Add Account</button></div>`;
+                <div class="form-group"><label>Owner / Responsibility</label><select id="f-own"><option value="Business">Business (Main)</option><option value="Partner1">${window.db.settings?.p1Name||'Partner 1'}</option><option value="Partner2">${window.db.settings?.p2Name||'Partner 2'}</option></select></div>
+                <div class="modal-actions"><button onclick="ui.submitAccount()" class="btn-primary">Create Account</button><button onclick="ui.closeModal()" class="btn-cancel">Cancel</button></div>`;
         } else if (base === 'ledger') {
             t.textContent = 'Create Master Ledger';
             const categories = await window.db.getGroups() || [];
@@ -320,8 +341,27 @@ window.ui = {
     },
 
     async submitAccount() {
-        await window.db.addAccount({ name: document.getElementById('f-name').value, opening_balance: document.getElementById('f-bal').value, owner_type: document.getElementById('f-own').value });
-        this.closeModal(); this.nav(this.page);
+        const btn = event.target;
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+            const payload = { 
+                name: document.getElementById('f-name').value, 
+                opening_balance: document.getElementById('f-bal').value, 
+                owner_type: document.getElementById('f-own').value,
+                account_type: document.getElementById('f-type').value
+            };
+            await window.db.addAccount(payload);
+            console.log('[UI] Account creation reflected.');
+            this.closeModal();
+            // Force re-render of current view + show success
+            await this.nav(this.page);
+            alert('Account created successfully!');
+        } catch(e) {
+            console.error('[UI] Account creation failed:', e);
+            alert('Failed to save account: ' + e.message);
+        } finally {
+            btn.disabled = false; btn.textContent = 'Create Account';
+        }
     },
 
     async submitLedger() {
