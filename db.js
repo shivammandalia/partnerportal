@@ -1,12 +1,22 @@
 /**
- * Partner Portal — Cloud Database Engine v6.0
+ * Partner Portal — Cloud Database Engine v6.1
  * Powered by Supabase (PostgreSQL)
  */
 
 window.db = {
     client: null,
     
-    // Placeholder credentials — User will add real ones in Vercel
+    // State cache to prevent UI hangs
+    state: {
+        accounts: [],
+        ledgers: [],
+        groups: [],
+        transactions: [],
+        currentUser: 'Administrator',
+        isLoaded: false
+    },
+
+    // Placeholder credentials fallback
     config: {
         url: window.location.hostname === 'localhost' ? 'http://localhost:8000/placeholder' : (window.env?.SUPABASE_URL || 'https://qolakoauilsrgtqejpzr.supabase.co'),
         key: window.env?.SUPABASE_ANON_KEY || 'sb_publishable_VIgBodRJbqJQHIxKo12amg_Rc-jvJw9'
@@ -15,7 +25,7 @@ window.db = {
     async init() {
         console.log('[DB] Connecting to Cloud Database...');
         
-        // Defaults
+        // Default Settings
         this.settings = {
             p1Name: 'Partner 1', p2Name: 'Partner 2', profitSharing: 50,
             currency: '₹', businessName: 'Partner Portal', precision: 2
@@ -37,38 +47,46 @@ window.db = {
 
             this.client = supabase.createClient(url, key);
             
-            // Fetch initial settings
-            const { data, error } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
-            
-            if (data && data.value) {
-                this.settings = data.value;
+            // Sync initial settings
+            const { data: settingsData } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
+            if (settingsData && settingsData.value) {
+                this.settings = settingsData.value;
                 console.log('[DB] Settings synced successfully.');
-            } else {
-                console.warn('[DB] No business config found in cloud. Using defaults.');
             }
+
+            // Sync Master Data
+            await this.syncMasterData();
+            
         } catch (e) {
-            console.warn('[DB] Cloud Sync inhibited. Using defaults.', e);
+            console.warn('[DB] Connection Error. Using defaults/local cache.', e);
+        } finally {
+            this.state.isLoaded = true;
         }
     },
 
-    // ── MASTER ACCESS ────────────────────────────────────────────────────────
-    async getGroups() {
-        if (!this.client) return [];
-        const { data } = await this.client.from('ledger_groups').select('*').order('name');
-        return data || [];
+    async syncMasterData() {
+        if (!this.client) return;
+        try {
+            console.log('[DB] Syncing Master Records...');
+            const [{ data: accs }, { data: leds }, { data: grps }] = await Promise.all([
+                this.client.from('money_accounts').select('*').order('name'),
+                this.client.from('ledgers').select('*').order('name'),
+                this.client.from('ledger_groups').select('*').order('name')
+            ]);
+
+            this.state.accounts = accs || [];
+            this.state.ledgers = leds || [];
+            this.state.groups = grps || [];
+            console.log(`[DB] Sync Complete: ${this.state.accounts.length} Accounts, ${this.state.ledgers.length} Ledgers.`);
+        } catch (err) {
+            console.error('[DB] Master Sync Failed:', err);
+        }
     },
 
-    async getLedgers() {
-        if (!this.client) return [];
-        const { data } = await this.client.from('ledgers').select('*').order('name');
-        return data || [];
-    },
-
-    async getAccounts() {
-        if (!this.client) return [];
-        const { data } = await this.client.from('money_accounts').select('*').order('name');
-        return data || [];
-    },
+    // ── MASTER ACCESS (Safe wrappers) ────────────────────────────────────────
+    async getGroups() { return this.state.groups.length ? this.state.groups : (await this.syncMasterData(), this.state.groups); },
+    async getLedgers() { return this.state.ledgers.length ? this.state.ledgers : (await this.syncMasterData(), this.state.ledgers); },
+    async getAccounts() { return this.state.accounts.length ? this.state.accounts : (await this.syncMasterData(), this.state.accounts); },
 
     async getCompatibleLedgers(txType) {
         const rules = {
@@ -86,73 +104,41 @@ window.db = {
         });
     },
 
-    // ── TRANSACTION WRITING ──────────────────────────────────────────────────
-    async addSale(d)    { return this._addTx('transactions', { ...d, type: 'sale' }); },
-    async addPurchase(d){ return this._addTx('transactions', { ...d, type: 'purchase' }); },
-    async addExpense(d) { return this._addTx('transactions', { ...d, type: 'expense' }); },
-    async addPartnerTx(d){ return this._addTx('partner_transactions', d); },
-
-    async _addTx(table, d) {
-        const payload = {
-            id: 'tx_' + Date.now() + Math.random().toString(36).substr(2, 5),
-            created_by: 'admin',
-            ...d
-        };
-        const { data, error } = await this.client.from(table).insert([payload]).select();
-        if (error) throw error;
-        return data[0];
-    },
-
-    async deleteTx(id) {
-        await this.client.from('transactions').delete().eq('id', id);
-        await this.client.from('partner_transactions').delete().eq('id', id);
-    },
-
-    async updateTx(id, d) {
-        const { error: e1 } = await this.client.from('transactions').update(d).eq('id', id);
-        const { error: e2 } = await this.client.from('partner_transactions').update(d).eq('id', id);
-    },
-
-    // ── MASTER MANAGEMENT ────────────────────────────────────────────────────
-    async addGroup(d) {
-        const id = 'grp_' + Date.now();
-        await this.client.from('ledger_groups').insert([{ id, ...d, is_internal: false }]);
-    },
-    async deleteGroup(id) {
-        const { error } = await this.client.from('ledger_groups').delete().eq('id', id);
-        if (error) throw new Error('Cannot delete group. Ensure it has no ledgers.');
-    },
-    async addLedger(d) {
-        const id = 'led_' + Date.now();
-        await this.client.from('ledgers').insert([{ id, ...d }]);
-    },
-    async deleteLedger(id) {
-        const { error } = await this.client.from('ledgers').delete().eq('id', id);
-        if (error) throw new Error('Cannot delete ledger. Ensure it has no transactions.');
-    },
-    async addAccount(d) {
-        const id = 'acc_' + Date.now();
-        await this.client.from('money_accounts').insert([{ id, ...d }]);
-    },
-    async deleteAccount(id) {
-        const { error } = await this.client.from('money_accounts').delete().eq('id', id);
-        if (error) throw new Error('Cannot delete account. Ensure it has no transactions.');
-    },
-
-    // ── CALCULATION ENGINE ───────────────────────────────────────────────────
+    // ── TRANSACTION LOGIC ────────────────────────────────────────────────────
     async getAllTransactions(f = {}) {
-        let q1 = this.client.from('transactions').select('*');
-        let q2 = this.client.from('partner_transactions').select('*');
+        if (!this.client) return [];
+        try {
+            let q1 = this.client.from('transactions').select('*');
+            let q2 = this.client.from('partner_transactions').select('*');
 
-        if (f.from) { q1 = q1.gte('date', f.from); q2 = q2.gte('date', f.from); }
-        if (f.to)   { q1 = q1.lte('date', f.to);   q2 = q2.lte('date', f.to); }
+            if (f.from) { q1 = q1.gte('date', f.from); q2 = q2.gte('date', f.from); }
+            if (f.to)   { q1 = q1.lte('date', f.to); q2 = q2.lte('date', f.to); }
 
-        const [{ data: d1 }, { data: d2 }] = await Promise.all([q1, q2]);
-        return [...(d1||[]), ...(d2||[])];
+            const [{ data: d1 }, { data: d2 }] = await Promise.all([q1, q2]);
+            return [...(d1||[]), ...(d2||[])];
+        } catch (e) {
+            console.error('[DB] Fetch Transactions Failed:', e);
+            return [];
+        }
+    },
+
+    async getSummary(f = {}) {
+        const txs = await this.getAllTransactions(f);
+        const s = txs.reduce((a, e) => {
+            const amt = parseFloat(e.amount) || 0;
+            if (e.type === 'sale') a.sales += amt;
+            else if (e.type === 'purchase') a.purchases += amt;
+            else if (e.type === 'expense') a.expenses += amt;
+            return a;
+        }, { sales: 0, purchases: 0, expenses: 0 });
+
+        const net = s.sales - s.purchases - s.expenses;
+        const share = this.settings.profitSharing || 50;
+        return { ...s, netProfit: net, p1Share: net * share / 100, p2Share: net * (100 - share) / 100 };
     },
 
     async getAccountStats(accountId, f = {}) {
-        const { data: acc } = await this.client.from('money_accounts').select('*').eq('id', accountId).single();
+        const acc = this.state.accounts.find(a => a.id === accountId);
         const opening = parseFloat(acc?.opening_balance) || 0;
         
         const txs = await this.getAllTransactions(f);
@@ -179,10 +165,11 @@ window.db = {
     },
 
     async getLedgerStats(ledgerId, f = {}) {
-        const { data: led } = await this.client.from('ledgers').select('*, ledger_groups(nature)').eq('id', ledgerId).single();
-        if (!led) return null;
+        const led = this.state.ledgers.find(l => l.id === ledgerId);
+        if (!led) return { dr: 0, cr: 0, balance: 0, opening: 0, opType: 'Dr', entries: [] };
         
-        const nature = led.ledger_groups?.nature || 'Asset';
+        const g = this.state.groups.find(gr => gr.id === led.group_id);
+        const nature = g?.nature || 'Asset';
         const txs = await this.getAllTransactions(f);
         const filtered = txs.filter(t => t.ledger_id === ledgerId);
 
@@ -207,26 +194,10 @@ window.db = {
         return { dr, cr, opening, opType, balance: closing, entries: filtered, nature };
     },
 
-    async getSummary(f = {}) {
-        const txs = await this.getAllTransactions(f);
-        const s = txs.reduce((a, e) => {
-            const amt = parseFloat(e.amount) || 0;
-            if (e.type === 'sale') a.sales += amt;
-            else if (e.type === 'purchase') a.purchases += amt;
-            else if (e.type === 'expense') a.expenses += amt;
-            return a;
-        }, { sales: 0, purchases: 0, expenses: 0 });
-
-        const net = s.sales - s.purchases - s.expenses;
-        const share = this.settings.profitSharing || 50;
-        return { ...s, netProfit: net, p1Share: net * share / 100, p2Share: net * (100 - share) / 100 };
-    },
-
     async getPartnerStats(partnerName, f = {}) {
         const pKey = partnerName === this.settings.p1Name ? 'p1' : 'p2';
         const partnerId = pKey === 'p1' ? 'partner1' : 'partner2';
         const name = this.settings[pKey + 'Name'];
-        const sharePct = pKey === 'p1' ? (this.settings.profitSharing || 50) : (100 - (this.settings.profitSharing || 50));
         
         const summary = await this.getSummary(f); 
         const earned = pKey === 'p1' ? summary.p1Share : summary.p2Share;
@@ -239,34 +210,49 @@ window.db = {
         const paid = filteredTxs.filter(t => t.type === 'settlement' && t.from_partner_id === partnerId).reduce((a, t) => a + (parseFloat(t.amount) || 0), 0);
         const recv = filteredTxs.filter(t => t.type === 'settlement' && t.to_partner_id === partnerId).reduce((a, t) => a + (parseFloat(t.amount) || 0), 0);
 
-        const { data: personalAccs } = await this.client.from('money_accounts').select('id').eq('owner_type', pKey==='p1'?'Partner1':'Partner2');
+        const personalAccs = this.state.accounts.filter(a => a.owner_type === (pKey==='p1'?'Partner1':'Partner2'));
         let moneyHeld = 0;
-        for (const acc of (personalAccs||[])) {
+        for (const acc of personalAccs) {
             const st = await this.getAccountStats(acc.id, {});
             moneyHeld += st.balance;
         }
 
         const capitalBalance = invested - drawings;
-        const netEntitlement = earned + capitalBalance;
-        const netPosition = moneyHeld - netEntitlement;
+        const netPosition = (earned + capitalBalance) - moneyHeld;
 
-        return {
-            name, partnerId, sharePct, earned, invested, drawings, paid, recv,
-            moneyHeld, capitalBalance, netEntitlement, netPosition, 
-            settlementPosition: netPosition, audit: summary 
-        };
+        return { name, partnerId, earned, invested, drawings, paid, recv, moneyHeld, netPosition, sharePct: (pKey==='p1'?this.settings.profitSharing:100-this.settings.profitSharing) };
     },
 
-    getDatePreset(preset) {
-        const now = new Date();
-        const fmt = d => d.toISOString().split('T')[0];
-        const today = fmt(now);
-        switch (preset) {
-            case 'today':      return { from: today, to: today };
-            case 'this_month': return { from: today.slice(0, 8) + '01', to: today };
-            case 'all':        return { from: '', to: '' };
-            default:           return { from: null, to: null };
-        }
+    // ── DATA WRITING (Safe) ──────────────────────────────────────────────────
+    async _addTx(table, d) {
+        if (!this.client) return;
+        const payload = { id: 'tx_' + Date.now(), created_by: this.state.currentUser, ...d };
+        await this.client.from(table).insert([payload]);
+        await this.syncMasterData(); // Refresh local cache
+    },
+
+    async addSale(d)    { await this._addTx('transactions', { ...d, type: 'sale' }); },
+    async addPurchase(d){ await this._addTx('transactions', { ...d, type: 'purchase' }); },
+    async addExpense(d) { await this._addTx('transactions', { ...d, type: 'expense' }); },
+    async addPartnerTx(d){ await this._addTx('partner_transactions', d); },
+    async addLedger(d)  { await this.client.from('ledgers').insert([{ id:'led_'+Date.now(), ...d }]); await this.syncMasterData(); },
+    async addAccount(d) { await this.client.from('money_accounts').insert([{ id:'acc_'+Date.now(), ...d }]); await this.syncMasterData(); },
+    
+    async deleteTx(id)      { await this.client.from('transactions').delete().eq('id', id); await this.client.from('partner_transactions').delete().eq('id', id); },
+    async deleteLedger(id)  { await this.client.from('ledgers').delete().eq('id', id); await this.syncMasterData(); },
+    async deleteAccount(id) { await this.client.from('money_accounts').delete().eq('id', id); await this.syncMasterData(); },
+
+    async saveSettings(s) { 
+        this.settings = s; 
+        await this.client.from('app_settings').upsert({ key: 'business_config', value: s }); 
+    },
+
+    getDatePreset(p) {
+        const d = new Date(), now = d.toISOString().split('T')[0];
+        if (p === 'today') return { from: now, to: now };
+        if (p === 'yesterday') { d.setDate(d.getDate()-1); const y = d.toISOString().split('T')[0]; return { from: y, to: y }; }
+        if (p === 'this_month') { const f = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]; return { from: f, to: now }; }
+        return { from: '', to: '' };
     }
 };
 
