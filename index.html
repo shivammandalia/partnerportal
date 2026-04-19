@@ -59,8 +59,8 @@
                         <i data-lucide="eye" id="pass-icon"></i>
                     </button>
                 </div>
-                <button type="button" id="login-submit-btn" class="login-btn" onclick="auth.success('Administrator')">
-                    <span>Enter Portal (Secure Bypass)</span>
+                <button type="button" id="login-submit-btn" class="login-btn" onclick="emergencyLogin()">
+                    <span>Enter Portal (Force Entry)</span>
                     <i data-lucide="arrow-right"></i>
                 </button>
             </form>
@@ -192,12 +192,34 @@
     </div>
 </div>
 
-<script src="db.js"></script>
-<script src="app.js"></script>
+<script src="db.js?v=2.1"></script>
+<script src="app.js?v=2.1"></script>
 
 <script>
+    // ULTRA-RESILIENT BYPASS: Works even if app.js fails
+    function emergencyLogin() {
+        console.log('[SYSTEM] Attempting Force Entry...');
+        localStorage.setItem('auth_session', JSON.stringify({ user: 'Administrator', ts: Date.now() }));
+        
+        const overlay = document.getElementById('login-overlay');
+        const main = document.getElementById('main-content');
+        
+        if (overlay) overlay.classList.add('hidden');
+        if (main) main.classList.remove('hidden');
+        
+        // Try to trigger the UI if it's alive
+        if (window.ui && typeof window.ui.nav === 'function') {
+            window.ui.nav('dashboard');
+        } else {
+            // Fallback: If UI is dead, hard reload once logged in
+            window.location.reload();
+        }
+    }
+
     // Boot UI
-    lucide.createIcons();
+    try {
+        lucide.createIcons();
+    } catch(e) {}
 </script>
 </body>
 </html>
