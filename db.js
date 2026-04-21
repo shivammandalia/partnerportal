@@ -1,6 +1,6 @@
 /**
- * Partner Portal — Cloud Database Engine v7.5
- * Professional Accounting Core: Advanced Auto-Seeding & Hardened Sync
+ * Partner Portal — Cloud Database Engine v11.5 (FINAL STABLE RELEASE)
+ * Professional Accounting Core: RESTORED snake_case for Database Schema
  */
 
 window.db = {
@@ -14,36 +14,34 @@ window.db = {
     },
 
     config: {
-        url: window.location.hostname === 'localhost' ? 'http://localhost:8000/placeholder' : (window.env?.SUPABASE_URL || 'https://qolakoauilsrgtqejpzr.supabase.co'),
+        url: window.env?.SUPABASE_URL || 'https://qolakoauilsrgtqejpzr.supabase.co',
         key: window.env?.SUPABASE_ANON_KEY || 'sb_publishable_VIgBodRJbqJQHIxKo12amg_Rc-jvJw9'
     },
 
     async init() {
-        console.log('[DB] Initializing Professional Core...');
+        console.log('[DB] v11.5: Omni-Compatible Schema Strategy (Auto-Healing)');
         this.settings = {
             p1Name: 'Partner 1', p2Name: 'Partner 2', profitSharing: 50,
             currency: '₹', businessName: 'Partner Portal', precision: 2
         };
 
-        if (typeof supabase === 'undefined') {
-            console.error('[DB] Supabase SDK missing!');
-            return;
-        }
+        if (typeof supabase === 'undefined') return console.error('[DB] SDK Missing');
 
         try {
             this.client = supabase.createClient(this.config.url, this.config.key);
             
-            // 1. Sync settings
-            const { data: s } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
+            const { data: s, error: sErr } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
+            if (sErr) throw sErr;
             if (s?.value) this.settings = s.value;
 
-            // 2. Sync Master Data
             await this.syncMasterData();
-
-            // 3. Self-Healing / Auto-Seed Pass
             await this.healAccountingMasters();
+            await this.syncMasterData();
+            
+            console.log('[DB] Foundation Finalized. Master Data Status: Healthy');
         } catch (e) {
             console.error('[DB] Init Error:', e);
+            alert('Database Connection Failed: ' + (e.message || 'Unknown Error'));
         } finally {
             this.state.isLoaded = true;
         }
@@ -52,100 +50,118 @@ window.db = {
     async healAccountingMasters() {
         if (!this.client) return;
         
-        // Step A: Groups
+        // 1. Required Groups
         const requiredGroups = [
             { name: 'Sales Accounts', nature: 'Income' },
             { name: 'Purchase Accounts', nature: 'Expense' },
             { name: 'Direct Expenses', nature: 'Expense' },
             { name: 'Indirect Expenses', nature: 'Expense' },
             { name: 'Capital Accounts', nature: 'Capital' },
-            { name: 'Current Assets', nature: 'Asset' },
-            { name: 'Current Liabilities', nature: 'Liability' },
-            { name: 'Sundry Creditors', nature: 'Liability' },
-            { name: 'Sundry Debtors', nature: 'Asset' },
             { name: 'Drawings', nature: 'Capital' },
             { name: 'Bank Accounts', nature: 'Asset' },
-            { name: 'Cash-in-Hand', nature: 'Asset' }
+            { name: 'Cash-in-Hand', nature: 'Asset' },
+            { name: 'Sundry Debtors', nature: 'Asset' },
+            { name: 'Sundry Creditors', nature: 'Liability' }
         ];
 
-        let grpsChanged = false;
         for (const g of requiredGroups) {
             if (!this.state.groups.find(eg => eg.name === g.name)) {
-                await this.client.from('ledger_groups').insert([g]);
-                grpsChanged = true;
+                await this.client.from('ledger_groups').insert([{ id: crypto.randomUUID(), ...g }]);
             }
         }
-        if (grpsChanged) await this.syncMasterData();
+        await this.syncMasterData();
 
-        // Step B: Ledgers
+        // 2. Required Ledgers (using camelCase for group_id if needed, but SQL schema says group_id)
         const requiredLedgers = [
             { name: 'Sales Account', group: 'Sales Accounts' },
             { name: 'Purchase Account', group: 'Purchase Accounts' },
             { name: 'Meta Ads', group: 'Indirect Expenses' },
             { name: 'Misc Expense', group: 'Indirect Expenses' },
-            { name: 'Salary Expense', group: 'Indirect Expenses' },
-            { name: 'Internet Expense', group: 'Indirect Expenses' },
-            { name: 'Refund Expense', group: 'Indirect Expenses' },
-            { name: 'Cash Adjustment', group: 'Current Assets' },
-            { name: 'General Supplier', group: 'Sundry Creditors' },
-            { name: 'General Customer', group: 'Sundry Debtors' },
+            { name: 'Cash Ledger', group: 'Cash-in-Hand' },
             { name: 'Partner 1 Capital', group: 'Capital Accounts' },
             { name: 'Partner 2 Capital', group: 'Capital Accounts' },
             { name: 'Partner 1 Drawings', group: 'Drawings' },
             { name: 'Partner 2 Drawings', group: 'Drawings' }
         ];
 
-        let ledsChanged = false;
         for (const l of requiredLedgers) {
             if (!this.state.ledgers.find(el => el.name === l.name)) {
                 const group = this.state.groups.find(g => g.name === l.group);
                 if (group) {
-                    await this.client.from('ledgers').insert([{ name: l.name, group_id: group.id }]);
-                    ledsChanged = true;
+                    await this.safeInsertLedger({ name: l.name, group_id: group.id });
                 }
             }
         }
-        if (ledsChanged) await this.syncMasterData();
+
+        // 3. Required Money Accounts (Omni-Compatible Mapping)
+        const requiredAccs = [
+            { name: 'Cash', account_type: 'Cash', owner_type: 'Business' },
+            { name: 'Partner 1 UPI', account_type: 'UPI', owner_type: 'Partner1' },
+            { name: 'Partner 2 UPI', account_type: 'UPI', owner_type: 'Partner2' }
+        ];
+
+        for (const a of requiredAccs) {
+            if (!this.state.accounts.find(ea => ea.name === a.name)) {
+                await this.safeInsertAccount({ 
+                    name: a.name, 
+                    account_type: a.account_type, 
+                    owner_type: a.owner_type, 
+                    opening_balance: 0 
+                });
+            }
+        }
     },
 
     async syncMasterData() {
         if (!this.client) return;
         try {
-            const [{ data: accs }, { data: leds }, { data: grps }] = await Promise.all([
-                this.client.from('money_accounts').select('*').order('name'),
+            const [grpRes, ledRes, accRes] = await Promise.all([
+                this.client.from('ledger_groups').select('*').order('name'),
                 this.client.from('ledgers').select('*').order('name'),
-                this.client.from('ledger_groups').select('*').order('name')
+                this.client.from('money_accounts').select('*').order('name')
             ]);
-            this.state.accounts = accs || [];
-            this.state.ledgers = leds || [];
-            this.state.groups = grps || [];
-            console.log(`[DB] Sync. Accs: ${this.state.accounts.length}, Leds: ${this.state.ledgers.length}, Grps: ${this.state.groups.length}`);
-        } catch (err) {
-            console.warn('[DB] Sync Fail:', err);
+            
+            if (grpRes.error) throw grpRes.error;
+            if (ledRes.error) throw ledRes.error;
+            if (accRes.error) throw accRes.error;
+
+            this.state.groups = grpRes.data || [];
+            this.state.ledgers = (ledRes.data || []).map(l => ({
+                id: l.id,
+                name: l.name,
+                group_id: l.group_id || l.groupId || l.groupid,
+                opening_balance: l.opening_balance || 0
+            }));
+            this.state.accounts = (accRes.data || []).map(a => ({
+                id: a.id,
+                name: a.name,
+                account_type: a.account_type || a.accountType || a.accounttype,
+                owner_type: a.owner_type || a.ownerType || a.ownertype,
+                opening_balance: a.opening_balance || a.openingBalance || 0
+            }));
+        } catch (e) {
+            console.error('[DB] Sync Fail:', e);
+            throw e;
         }
     },
 
-    // ── DATA ACCESS ──────────────────────────────────────────────────────────
     async getAccounts() { return this.state.accounts; },
     async getLedgers() { return this.state.ledgers; },
     async getGroups() { return this.state.groups; },
 
     async getCompatibleLedgers(txType) {
         const rules = {
-            sale: ['Sales Accounts', 'Direct Income', 'Indirect Income', 'Sundry Debtors'],
-            purchase: ['Purchase Accounts', 'Direct Expenses', 'Indirect Expenses', 'Sundry Creditors'],
+            sale: ['Sales Accounts', 'Indirect Income', 'Sundry Debtors'],
+            purchase: ['Purchase Accounts', 'Direct Expenses', 'Sundry Creditors'],
             expense: ['Direct Expenses', 'Indirect Expenses'],
             investment: ['Capital Accounts'],
             withdrawal: ['Drawings'],
             settlement: ['Capital Accounts']
         };
-        const allowedGroupNames = rules[txType] || [];
-        const leds = await this.getLedgers();
-        const grps = await this.getGroups();
-        
-        return leds.filter(l => {
-            const g = grps.find(gr => gr.id === l.group_id);
-            return allowedGroupNames.includes(g?.name);
+        const allowed = rules[txType] || [];
+        return this.state.ledgers.filter(l => {
+            const g = this.state.groups.find(gr => gr.id === l.group_id);
+            return allowed.includes(g?.name);
         });
     },
 
@@ -156,12 +172,11 @@ window.db = {
             let q2 = this.client.from('partner_transactions').select('*');
             if (f.from) { q1 = q1.gte('date', f.from); q2 = q2.gte('date', f.from); }
             if (f.to)   { q1 = q1.lte('date', f.to); q2 = q2.lte('date', f.to); }
-            const [{ data: d1 }, { data: d2 }] = await Promise.all([q1, q2]);
-            return [...(d1||[]), ...(d2||[])].sort((a,b) => new Date(b.date) - new Date(a.date));
+            const [r1, r2] = await Promise.all([q1, q2]);
+            return [...(r1.data||[]), ...(r2.data||[])].sort((a,b) => new Date(b.date) - new Date(a.date));
         } catch (e) { return []; }
     },
 
-    // ── CALCULATION ENGINE ──────────────────────────────────────────────────
     async getSummary(f = {}) {
         const txs = await this.getAllTransactions(f);
         const s = txs.reduce((a, e) => {
@@ -181,14 +196,22 @@ window.db = {
         const opening = parseFloat(acc?.opening_balance) || 0;
         const txs = await this.getAllTransactions(f);
         let inflow = 0, outflow = 0;
-        txs.filter(t => t.account_id === accountId || t.from_account_id === accountId || t.to_account_id === accountId).forEach(e => {
+        txs.forEach(e => {
             const a = parseFloat(e.amount) || 0;
-            const isTo = e.to_account_id === accountId;
-            const isFrom = e.from_account_id === accountId || e.account_id === accountId;
-            if (['sale', 'investment'].includes(e.type) || isTo) { inflow += a; } 
-            else if (['purchase', 'expense', 'withdrawal'].includes(e.type) || isFrom) { outflow += a; }
+            if (e.account_id === accountId) {
+                if (e.type === 'sale') inflow += a;
+                else if (['purchase', 'expense'].includes(e.type)) outflow += a;
+            }
+            if (e.money_account_id === accountId) {
+                if (e.type === 'investment') inflow += a;
+                else if (e.type === 'withdrawal') outflow += a;
+            }
+            if (e.type === 'settlement') {
+                if (e.to_account_id === accountId) inflow += a;
+                if (e.from_account_id === accountId) outflow += a;
+            }
         });
-        return { inflow, outflow, balance: opening + inflow - outflow };
+        return { balance: opening + inflow - outflow };
     },
 
     async getPartnerStats(pNum, f = {}) {
@@ -202,49 +225,87 @@ window.db = {
         const pTxs = txs.filter(t => t.partner_id === partnerId || t.from_partner_id === partnerId || t.to_partner_id === partnerId);
         const invested = pTxs.filter(t => t.type === 'investment').reduce((a, t) => a + (parseFloat(t.amount)||0), 0);
         const drawings = pTxs.filter(t => t.type === 'withdrawal').reduce((a, t) => a + (parseFloat(t.amount)||0), 0);
-        const settledOut = pTxs.filter(t => t.type === 'settlement' && t.from_partner_id === partnerId).reduce((a, t) => a + (parseFloat(t.amount)||0), 0);
-        const settledIn = pTxs.filter(t => t.type === 'settlement' && t.to_partner_id === partnerId).reduce((a, t) => a + (parseFloat(t.amount)||0), 0);
         const pAccounts = this.state.accounts.filter(a => a.owner_type === 'Partner' + pNum);
         let moneyHeld = 0;
         for(const acc of pAccounts) {
             const st = await this.getAccountStats(acc.id, f);
             moneyHeld += st.balance;
         }
-        const netInvestment = invested - drawings;
-        const position = (moneyHeld - netInvestment) - earned;
-        return { name, partnerId, earned, invested, drawings, moneyHeld, settledIn, settledOut, position, sharePct };
+        const position = (moneyHeld - (invested - drawings)) - earned;
+        return { name, partnerId, earned, invested, drawings, moneyHeld, position, sharePct };
     },
 
-    // ── WRITING DATA ────────────────────────────────────────────────────────
     async addTx(type, d) {
         if (!this.client) return;
         const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
-        const payload = {
-            id: 'tx_' + Date.now(),
-            type,
-            created_at: new Date().toISOString(),
-            created_by: this.state.currentUser,
-            ...d
-        };
-        await this.client.from(table).insert([payload]);
+        const { error } = await this.client.from(table).insert([{ id: crypto.randomUUID(), ...d, type, created_by: this.state.currentUser }]);
+        if (error) throw error;
         await this.syncMasterData();
+    },
+
+    async updateTx(id, type, d) {
+        console.log(`[DB UPDATE] id: ${id}, type: ${type}`, d);
+        if (!this.client) return;
+        const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
+        const { error } = await this.client.from(table).update(d).eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+
+    async deleteTx(id, type) {
+        console.log(`[DB DELETE] id: ${id}, type: ${type}`);
+        if (!this.client) return;
+        const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
+        const { error } = await this.client.from(table).delete().eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+
+    async safeInsertAccount(a) {
+        let errs = [];
+        const id = crypto.randomUUID();
+        let { error: e1 } = await this.client.from('money_accounts').insert([{ id, name: a.name, account_type: a.account_type, owner_type: a.owner_type, opening_balance: a.opening_balance || 0 }]);
+        if (!e1) return; errs.push(e1.message);
+        
+        let { error: e2 } = await this.client.from('money_accounts').insert([{ id, name: a.name, accountType: a.account_type, ownerType: a.owner_type, opening_balance: a.opening_balance || 0 }]);
+        if (!e2) return; errs.push(e2.message);
+        
+        let { error: e3 } = await this.client.from('money_accounts').insert([{ id, name: a.name, accounttype: a.account_type, ownertype: a.owner_type, opening_balance: a.opening_balance || 0 }]);
+        if (e3) { errs.push(e3.message); throw new Error("Auto-Heal Insert Failed: " + errs.join(" | ")); }
+    },
+
+    async safeInsertLedger(l) {
+        let errs = [];
+        const id = crypto.randomUUID();
+        let { error: e1 } = await this.client.from('ledgers').insert([{ id, name: l.name, group_id: l.group_id }]);
+        if (!e1) return; errs.push(e1.message);
+
+        let { error: e2 } = await this.client.from('ledgers').insert([{ id, name: l.name, groupId: l.group_id }]);
+        if (!e2) return; errs.push(e2.message);
+
+        let { error: e3 } = await this.client.from('ledgers').insert([{ id, name: l.name, groupid: l.group_id }]);
+        if (e3) { errs.push(e3.message); throw new Error("Auto-Heal Insert Failed: " + errs.join(" | ")); }
     },
 
     async addAccount(d) { 
         if (!this.client) return;
-        const payload = { id: 'acc_' + Date.now(), status: 'Active', ...d };
-        const { data, error } = await this.client.from('money_accounts').insert([payload]).select();
-        if (error) throw error;
+        await this.safeInsertAccount({
+            name: d.name,
+            account_type: d.account_type,
+            owner_type: d.owner_type,
+            opening_balance: parseFloat(d.opening_balance) || 0
+        });
         await this.syncMasterData(); 
-        return data?.[0];
     },
 
-    async addLedger(d)  { await this.client.from('ledgers').insert([{ id:'led_'+Date.now(), ...d }]); await this.syncMasterData(); },
-    async deleteTx(id)   { await this.client.from('transactions').delete().eq('id', id); await this.client.from('partner_transactions').delete().eq('id', id); },
-    
+    async addLedger(d)  { 
+        await this.safeInsertLedger(d);
+        await this.syncMasterData(); 
+    },
     async saveSettings(s) { 
         this.settings = s; 
-        await this.client.from('app_settings').upsert({ key: 'business_config', value: s }); 
+        const { error } = await this.client.from('app_settings').upsert({ key: 'business_config', value: s }); 
+        if (error) throw error;
     },
 
     getDatePreset(p) {

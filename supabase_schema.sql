@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS ledgers (
 CREATE TABLE IF NOT EXISTS money_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    accountType TEXT NOT NULL, -- UPI, Bank, Cash
-    ownerType TEXT NOT NULL, -- Business, Partner1, Partner2
+    account_type TEXT NOT NULL, -- UPI, Bank, Cash
+    owner_type TEXT NOT NULL, -- Business, Partner1, Partner2
     opening_balance DECIMAL(18,2) DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
