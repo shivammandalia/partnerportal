@@ -145,9 +145,9 @@ window.db = {
         }
     },
 
-    async getAccounts() { return this.state.accounts; },
-    async getLedgers() { return this.state.ledgers; },
-    async getGroups() { return this.state.groups; },
+    async getAccounts(includeArchived = false) { return includeArchived ? this.state.accounts : this.state.accounts.filter(a => !String(a.name).startsWith('[ARCHIVED]')); },
+    async getLedgers(includeArchived = false) { return includeArchived ? this.state.ledgers : this.state.ledgers.filter(a => !String(a.name).startsWith('[ARCHIVED]')); },
+    async getGroups(includeArchived = false) { return includeArchived ? this.state.groups : this.state.groups.filter(a => !String(a.name).startsWith('[ARCHIVED]')); },
 
     async getCompatibleLedgers(txType) {
         const rules = {
@@ -160,6 +160,7 @@ window.db = {
         };
         const allowed = rules[txType] || [];
         return this.state.ledgers.filter(l => {
+            if (String(l.name).startsWith('[ARCHIVED]')) return false;
             const g = this.state.groups.find(gr => gr.id === l.group_id);
             return allowed.includes(g?.name);
         });
@@ -302,6 +303,55 @@ window.db = {
         await this.safeInsertLedger(d);
         await this.syncMasterData(); 
     },
+    async updateAccount(id, payload) {
+        if (!this.client) return;
+        const { error } = await this.client.from('money_accounts').update(payload).eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async deleteAccount(id) {
+        if (!this.client) return;
+        const { error } = await this.client.from('money_accounts').delete().eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async updateLedger(id, payload) {
+        if (!this.client) return;
+        const { error } = await this.client.from('ledgers').update(payload).eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async deleteLedger(id) {
+        if (!this.client) return;
+        const { error } = await this.client.from('ledgers').delete().eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async updateGroup(id, payload) {
+        if (!this.client) return;
+        const { error } = await this.client.from('ledger_groups').update(payload).eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async deleteGroup(id) {
+        if (!this.client) return;
+        const { error } = await this.client.from('ledger_groups').delete().eq('id', id);
+        if (error) throw error;
+        await this.syncMasterData();
+    },
+    async isRecordUsed(type, id) {
+        const txs = await this.getAllTransactions({ preset: 'all' }); 
+        if (type === 'account') {
+            return txs.some(t => t.account_id === id || t.money_account_id === id || t.from_account_id === id || t.to_account_id === id);
+        }
+        if (type === 'ledger') {
+            return txs.some(t => t.ledger_id === id);
+        }
+        if (type === 'group') {
+            return this.state.ledgers.some(l => l.group_id === id);
+        }
+        return false;
+    },
     async saveSettings(s) { 
         this.settings = s; 
         const { error } = await this.client.from('app_settings').upsert({ key: 'business_config', value: s }); 
@@ -311,8 +361,25 @@ window.db = {
     getDatePreset(p) {
         const d = new Date(), now = d.toISOString().split('T')[0];
         if (p === 'today') return { from: now, to: now };
-        if (p === 'yesterday') { d.setDate(d.getDate()-1); const y = d.toISOString().split('T')[0]; return { from: y, to: y }; }
-        if (p === 'this_month') { const f = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]; return { from: f, to: now }; }
+        if (p === 'this_week') { 
+            const diff = d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1); 
+            const fw = new Date(d.setDate(diff)).toISOString().split('T')[0]; 
+            return { from: fw, to: now };
+        }
+        if (p === 'this_month') { 
+            const f = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]; 
+            return { from: f, to: now }; 
+        }
+        if (p === 'last_month') { 
+            const f = new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().split('T')[0];
+            const t = new Date(d.getFullYear(), d.getMonth(), 0).toISOString().split('T')[0];
+            return { from: f, to: t }; 
+        }
+        if (p === 'this_year') { 
+            const f = new Date(d.getFullYear(), 0, 1).toISOString().split('T')[0]; 
+            return { from: f, to: now }; 
+        }
+        if (p === 'custom') return null;
         return { from: '', to: '' };
     }
 };

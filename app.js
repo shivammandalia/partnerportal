@@ -97,13 +97,65 @@ window.ui = {
     renderFilterBar() {
         const root = document.getElementById('filter-bar-root');
         if (!root) return;
-        const presets = ['today', 'yesterday', 'this_month', 'all'];
+        const presets = ['today', 'this_week', 'this_month', 'last_month', 'this_year', 'all'];
+        const isCustom = this.filter.preset === 'custom';
+        
         root.innerHTML = `<div class="filter-bar">
-            <div class="fb-presets">${presets.map(p => `<button class="fb-btn ${this.filter.preset===p?'active':''}" onclick="ui.setFilterPreset('${p}')">${p.replace('_',' ')}</button>`).join('')}</div>
+            <div class="fb-presets">
+                ${presets.map(p => {
+                    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                    return `<button class="fb-btn ${this.filter.preset===p?'active':''}" onclick="ui.setFilterPreset('${p}')">${label}</button>`;
+                }).join('')}
+                <button class="fb-btn ${isCustom ? 'active' : ''}" onclick="ui.toggleCustomFilter()">Custom Range</button>
+            </div>
+            ${isCustom ? `
+            <div class="fb-custom-range">
+                <div class="fb-input-group">
+                    <label>From</label>
+                    <input type="date" id="fc-from" value="${this.filter.from || ''}">
+                </div>
+                <div class="fb-input-group">
+                    <label>To</label>
+                    <input type="date" id="fc-to" value="${this.filter.to || ''}">
+                </div>
+                <div class="fb-actions">
+                    <button class="fb-apply-btn" onclick="ui.applyCustomFilter()">Apply</button>
+                    <button class="fb-cancel-btn" onclick="ui.setFilterPreset('this_month')">Reset</button>
+                </div>
+            </div>` : ''}
         </div>`;
     },
 
-    setFilterPreset(p) { const r = window.db.getDatePreset(p); this.filter = { from: r.from, to: r.to, preset: p }; this.renderFilterBar(); this.nav(this.page); },
+    toggleCustomFilter() {
+        this.filter = { from: this.filter.from, to: this.filter.to, preset: 'custom' };
+        this.renderFilterBar();
+    },
+
+    applyCustomFilter() {
+        const f = document.getElementById('fc-from').value;
+        const t = document.getElementById('fc-to').value;
+        if (!f || !t) { alert('Both From and To dates are required.'); return; }
+        
+        try {
+            const df = new Date(f), dt = new Date(t);
+            if (isNaN(df.getTime()) || isNaN(dt.getTime())) throw new Error();
+            if (df.getFullYear() > 2100 || dt.getFullYear() > 2100 || df.getFullYear() < 2000) { alert('Year must be between 2000 and 2100.'); return; }
+            if (df > dt) { alert('From date cannot be after To date.'); return; }
+        } catch(e) {
+            alert('Invalid date format.'); return;
+        }
+
+        this.filter = { from: f, to: t, preset: 'custom' };
+        this.renderFilterBar();
+        this.nav(this.page);
+    },
+
+    setFilterPreset(p) { 
+        const r = window.db.getDatePreset(p); 
+        this.filter = { from: r.from, to: r.to, preset: p }; 
+        this.renderFilterBar(); 
+        this.nav(this.page); 
+    },
 
     async renderDashboard(c) {
         try {
@@ -266,34 +318,80 @@ window.ui = {
 
     async renderAccounts(c) {
         try {
-            const accs = await window.db.getAccounts() || [];
+            const showArch = !!window._showArchived;
+            const accsToggleAll = await window.db.getAccounts(true) || [];
+            const accs = accsToggleAll.filter(a => showArch || !a.name.startsWith('[ARCHIVED]'));
+            
             c.innerHTML = `
-            <div class="header-action-row"><p>Cash & Bank Accounts</p><button onclick="ui.openModal('account-add')" class="btn-primary" style="width:auto">+ Add Wallet</button></div>
+            <div class="header-action-row">
+                <p>Cash & Bank Accounts</p>
+                <div style="display:flex; gap:1rem; align-items:center;">
+                    <label style="color:var(--t2); font-size:0.8rem; cursor:pointer;"><input type="checkbox" ${showArch?'checked':''} onchange="window._showArchived = this.checked; ui.renderAccounts(document.getElementById('page-container'));"> Show Archived</label>
+                    <button onclick="ui.openModal('account-add')" class="btn-primary" style="width:auto">+ Add Wallet</button>
+                </div>
+            </div>
             <div class="accounts-grid">
                 ${(await Promise.all(accs.map(async a => {
                     const s = await window.db.getAccountStats(a.id, this.filter);
-                    return `<div class="acc-full-card"><div class="afc-name">${a.name}</div><div class="afc-balance">${this.fmt(s?.balance || 0)}</div><div class="afc-tag">${a.owner_type} · ${a.account_type}</div></div>`;
-                }))).join('') || '<div class="empty-state">No money accounts. Repairing foundation...</div>'}
+                    const isArch = a.name.startsWith('[ARCHIVED]');
+                    return `<div class="acc-full-card ${isArch ? 'opacity-50' : ''}">
+                        <div class="afc-name">${a.name}</div>
+                        <div class="afc-balance">${this.fmt(s?.balance || 0)}</div>
+                        <div class="afc-tag">${a.owner_type} · ${a.account_type}</div>
+                        <div style="margin-top:1rem; border-top:1px solid var(--br); padding-top:0.75rem; display:flex; gap:0.5rem; justify-content:flex-end;">
+                            <button class="row-icon-btn" onclick="ui.editMaster('account', '${a.id}')" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></button>
+                            ${!isArch ? `<button class="row-icon-btn" onclick="ui.deleteMaster('account', '${a.id}')" title="Delete/Archive"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg></button>` : ''}
+                        </div>
+                    </div>`;
+                }))).join('') || '<div class="empty-state">No money accounts available.</div>'}
             </div>`;
         } catch(e) { c.innerHTML = `Error: ${e.message}`; }
     },
 
     async renderLedgers(c) {
-        const leds = await window.db.getLedgers();
-        const grps = await window.db.getGroups();
-        c.innerHTML = `<div class="header-action-row"><p>Accounting Heads</p><button onclick="ui.openModal('ledger-add')" class="btn-primary" style="width:auto">+ New Ledger</button></div>
-        <div class="ledger-table-container"><table class="ledger-table"><thead><tr><th>Ledger Name</th><th>Group / Class</th></tr></thead><tbody>
+        const showArch = !!window._showArchived;
+        const ledsAll = await window.db.getLedgers(true) || [];
+        const leds = ledsAll.filter(a => showArch || !a.name.startsWith('[ARCHIVED]'));
+        const grps = await window.db.getGroups(true);
+        c.innerHTML = `<div class="header-action-row">
+            <p>Accounting Heads</p>
+            <div style="display:flex; gap:1rem; align-items:center;">
+                <label style="color:var(--t2); font-size:0.8rem; cursor:pointer;"><input type="checkbox" ${showArch?'checked':''} onchange="window._showArchived = this.checked; ui.renderLedgers(document.getElementById('page-container'));"> Show Archived</label>
+                <button onclick="ui.openModal('ledger-add')" class="btn-primary" style="width:auto">+ New Ledger</button>
+            </div>
+        </div>
+        <div class="ledger-table-container"><table class="ledger-table"><thead><tr><th>Ledger Name</th><th>Group / Class</th><th style="text-align:right">Actions</th></tr></thead><tbody>
         ${leds.map(l => {
             const g = grps.find(gr => gr.id === l.group_id);
-            return `<tr><td style="font-weight:500;">${l.name}</td><td><span class="group-badge">${g?.name || '—'}</span></td></tr>`;
+            const isArch = l.name.startsWith('[ARCHIVED]');
+            return `<tr style="${isArch ? 'opacity:0.5' : ''}"><td style="font-weight:500;">${l.name}</td><td><span class="group-badge">${g?.name || '—'}</span></td>
+            <td style="text-align:right">
+                <button class="row-icon-btn" onclick="ui.editMaster('ledger', '${l.id}')" title="Edit" style="color:var(--a)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></button>
+                ${!isArch ? `<button class="row-icon-btn" onclick="ui.deleteMaster('ledger', '${l.id}')" title="Delete/Archive"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg></button>` : ''}
+            </td></tr>`;
         }).join('')}
         </tbody></table></div>`;
     },
 
     async renderGroups(c) {
-        const grps = await window.db.getGroups();
-        c.innerHTML = `<div class="ledger-table-container"><table class="ledger-table"><thead><tr><th>Classification</th><th>Nature</th></tr></thead><tbody>
-        ${grps.map(g => `<tr><td style="font-weight:500;">${g.name}</td><td><span class="badge ${g.nature.toLowerCase()==='asset'?'sales':g.nature.toLowerCase()==='liability'?'expense':'other'}">${g.nature}</span></td></tr>`).join('')}
+        const showArch = !!window._showArchived;
+        const grpsAll = await window.db.getGroups(true) || [];
+        const grps = grpsAll.filter(a => showArch || !a.name.startsWith('[ARCHIVED]'));
+        c.innerHTML = `<div class="header-action-row">
+            <p>Ledger Groups</p>
+            <div style="display:flex; gap:1rem; align-items:center;">
+                <label style="color:var(--t2); font-size:0.8rem; cursor:pointer;"><input type="checkbox" ${showArch?'checked':''} onchange="window._showArchived = this.checked; ui.renderGroups(document.getElementById('page-container'));"> Show Archived</label>
+            </div>
+        </div>
+        <div class="ledger-table-container"><table class="ledger-table"><thead><tr><th>Classification</th><th>Nature</th><th style="text-align:right">Actions</th></tr></thead><tbody>
+        ${grps.map(g => {
+            const isArch = g.name.startsWith('[ARCHIVED]');
+            return `<tr style="${isArch ? 'opacity:0.5' : ''}"><td style="font-weight:500;">${g.name}</td><td><span class="badge ${g.nature.toLowerCase()==='asset'?'sales':g.nature.toLowerCase()==='liability'?'expense':'other'}">${g.nature}</span></td>
+            <td style="text-align:right">
+                <button class="row-icon-btn" onclick="ui.editMaster('group', '${g.id}')" title="Edit" style="color:var(--a)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></button>
+                ${!isArch ? `<button class="row-icon-btn" onclick="ui.deleteMaster('group', '${g.id}')" title="Delete/Archive"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg></button>` : ''}
+            </td></tr>`;
+        }).join('')}
         </tbody></table></div>`;
     },
 
@@ -545,6 +643,100 @@ window.ui = {
             console.error(`[UPDATE ERROR]`, e);
             alert(`Update Failed: ${e.message}`);
             if (btn) btn.textContent = 'Save Changes';
+        }
+    },
+
+    async editMaster(type, id) {
+        const o = document.getElementById('modal-overlay'), b = document.getElementById('modal-body'), t = document.getElementById('modal-title');
+        if (!o || !b || !t) return;
+        o.classList.remove('hidden'); b.innerHTML = '<div class="spinner"></div>';
+        
+        let record = null;
+        if (type === 'account') record = window.db.state.accounts.find(x => x.id === id);
+        if (type === 'ledger')  record = window.db.state.ledgers.find(x => x.id === id);
+        if (type === 'group')   record = window.db.state.groups.find(x => x.id === id);
+        
+        if (!record) { alert('Record not found.'); this.closeModal(); return; }
+
+        if (type === 'account') {
+            t.textContent = 'Edit Money Wallet';
+            b.innerHTML = `<div class="form-group"><label>Name</label><input id="f-name" value="${record.name.replace('[ARCHIVED] ', '')}"></div>
+                <div class="form-group"><label>Owner</label><select id="f-own"><option value="Business" ${record.owner_type==='Business'?'selected':''}>Business</option><option value="Partner1" ${record.owner_type.toLowerCase()==='partner1'?'selected':''}>${window.db.settings.p1Name}</option><option value="Partner2" ${record.owner_type.toLowerCase()==='partner2'?'selected':''}>${window.db.settings.p2Name}</option></select></div>
+                <div class="form-group"><label>Type</label><select id="f-type"><option value="Bank" ${record.account_type==='Bank'?'selected':''}>Bank</option><option value="UPI" ${record.account_type==='UPI'?'selected':''}>UPI</option><option value="Cash" ${record.account_type==='Cash'?'selected':''}>Cash</option></select></div>
+                <div class="modal-actions"><button onclick="ui.submitMasterEdit('${type}', '${id}')" class="btn-primary">Save Changes</button></div>`;
+        } else if (type === 'ledger') {
+            t.textContent = 'Edit Ledger';
+            const grps = await window.db.getGroups(true);
+            b.innerHTML = `<div class="form-group"><label>Name</label><input id="f-name" value="${record.name.replace('[ARCHIVED] ', '')}"></div>
+                <div class="form-group"><label>Group</label><select id="f-grp">${grps.map(g=>`<option value="${g.id}" ${g.id===record.group_id?'selected':''}>${g.name}</option>`).join('')}</select></div>
+                <div class="modal-actions"><button onclick="ui.submitMasterEdit('${type}', '${id}')" class="btn-primary">Save Changes</button></div>`;
+        } else if (type === 'group') {
+            t.textContent = 'Edit Ledger Group';
+            b.innerHTML = `<div class="form-group"><label>Name</label><input id="f-name" value="${record.name.replace('[ARCHIVED] ', '')}"></div>
+                <div class="form-group"><label>Nature</label><select id="f-nat"><option value="Asset" ${record.nature==='Asset'?'selected':''}>Asset</option><option value="Liability" ${record.nature==='Liability'?'selected':''}>Liability</option><option value="Income" ${record.nature==='Income'?'selected':''}>Income</option><option value="Expense" ${record.nature==='Expense'?'selected':''}>Expense</option><option value="Capital" ${record.nature==='Capital'?'selected':''}>Capital</option></select></div>
+                <div class="modal-actions"><button onclick="ui.submitMasterEdit('${type}', '${id}')" class="btn-primary">Save Changes</button></div>`;
+        }
+    },
+
+    async submitMasterEdit(type, id) {
+        try {
+            const name = document.getElementById('f-name').value;
+            if (!name) { alert('Name is required.'); return; }
+            
+            let record = null;
+            if (type === 'account') record = window.db.state.accounts.find(x => x.id === id);
+            if (type === 'ledger')  record = window.db.state.ledgers.find(x => x.id === id);
+            if (type === 'group')   record = window.db.state.groups.find(x => x.id === id);
+            
+            const finalName = record.name.startsWith('[ARCHIVED]') ? '[ARCHIVED] ' + name : name;
+            
+            if (type === 'account') {
+                const owner = document.getElementById('f-own').value, accType = document.getElementById('f-type').value;
+                await window.db.updateAccount(id, { name: finalName, owner_type: owner, account_type: accType });
+            } else if (type === 'ledger') {
+                const grp = document.getElementById('f-grp').value;
+                await window.db.updateLedger(id, { name: finalName, group_id: grp });
+            } else if (type === 'group') {
+                const nat = document.getElementById('f-nat').value;
+                await window.db.updateGroup(id, { name: finalName, nature: nat });
+            }
+            alert('Saved successfully!');
+            this.closeModal();
+            this.nav(this.page);
+        } catch(e) {
+            alert('Failed: ' + e.message);
+        }
+    },
+
+    async deleteMaster(type, id) {
+        if (!confirm('Are you sure you want to completely manage this record?')) return;
+        try {
+            const isUsed = await window.db.isRecordUsed(type, id);
+            if (['account', 'ledger', 'group'].includes(type) && isUsed) {
+                if (!confirm('Safety Block: This record is currently used in transactions/hierarchy and cannot be deleted permanently. Would you like to Archive it instead to hide it from menus while keeping historical reports intact?')) return;
+                
+                let name = '';
+                if (type === 'account') name = window.db.state.accounts.find(a => a.id === id)?.name || '';
+                if (type === 'ledger') name = window.db.state.ledgers.find(l => l.id === id)?.name || '';
+                if (type === 'group') name = window.db.state.groups.find(g => g.id === id)?.name || '';
+                
+                if (name.startsWith('[ARCHIVED]')) { alert('Record is already archived.'); return; }
+                const newName = '[ARCHIVED] ' + name;
+                
+                if (type === 'account') await window.db.updateAccount(id, { name: newName });
+                if (type === 'ledger') await window.db.updateLedger(id, { name: newName });
+                if (type === 'group') await window.db.updateGroup(id, { name: newName });
+                alert('Record safely Archived!');
+            } else {
+                if (!confirm('This record is historically unused. Do you want to proceed with a permanent hard delete?')) return;
+                if (type === 'account') await window.db.deleteAccount(id);
+                if (type === 'ledger') await window.db.deleteLedger(id);
+                if (type === 'group') await window.db.deleteGroup(id);
+                alert('Record cleanly deleted forever!');
+            }
+            this.nav(this.page);
+        } catch(e) {
+            alert('Failed: ' + e.message);
         }
     },
 

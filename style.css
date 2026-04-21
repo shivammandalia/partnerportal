@@ -1092,6 +1092,21 @@ select { appearance:auto; }
 }
 .fb-apply-btn:active { transform: scale(0.96); }
 
+.fb-cancel-btn {
+    padding: 0.45rem 1rem;
+    background: transparent;
+    color: var(--t2);
+    border: 1px solid var(--br);
+    border-radius: var(--r-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.fb-cancel-btn:hover { color: #fff; background: rgba(255,255,255,0.05); }
+
+.fb-custom-range { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-left: 1rem; padding-left: 1rem; border-left: 1px solid var(--br); }
+.fb-actions { display: flex; gap: 0.5rem; align-items: center; }
+
 @media (max-width: 900px) {
     .filter-bar { flex-direction: column; align-items: stretch; gap: 1rem; position: static; }
     .fb-custom { flex-direction: column; align-items: stretch; gap: 0.75rem; }
