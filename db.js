@@ -22,7 +22,9 @@ window.db = {
         console.log('[DB] v11.5: Omni-Compatible Schema Strategy (Auto-Healing)');
         this.settings = {
             p1Name: 'Partner 1', p2Name: 'Partner 2', profitSharing: 50,
-            currency: '₹', businessName: 'Partner Portal', precision: 2
+            currency: '₹', businessName: 'Partner Portal', precision: 2,
+            gsWebhookUrl: 'https://script.google.com/macros/s/AKfycbzBo87jtgTJySnH6Nb6xSgGSywmxwkhbLaF2B7GjW9SFvBByOZfu5qof-LJwuNB3Q/exec', 
+            gsBackupEnabled: true
         };
 
         if (typeof supabase === 'undefined') return console.error('[DB] SDK Missing');
@@ -239,8 +241,11 @@ window.db = {
     async addTx(type, d) {
         if (!this.client) return;
         const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
-        const { error } = await this.client.from(table).insert([{ id: crypto.randomUUID(), ...d, type, created_by: this.state.currentUser }]);
+        const id = crypto.randomUUID();
+        const payload = { id, ...d, type, created_by: this.state.currentUser };
+        const { error } = await this.client.from(table).insert([payload]);
         if (error) throw error;
+        this.postToGoogleSheets(type, 'CREATE', payload);
         await this.syncMasterData();
     },
 
@@ -250,6 +255,7 @@ window.db = {
         const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
         const { error } = await this.client.from(table).update(d).eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets(type, 'EDIT', { id, ...d });
         await this.syncMasterData();
     },
 
@@ -259,6 +265,7 @@ window.db = {
         const table = ['investment', 'withdrawal', 'settlement'].includes(type) ? 'partner_transactions' : 'transactions';
         const { error } = await this.client.from(table).delete().eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets(type, 'DELETE', { id });
         await this.syncMasterData();
     },
 
@@ -273,6 +280,7 @@ window.db = {
         
         let { error: e3 } = await this.client.from('money_accounts').insert([{ id, name: a.name, accounttype: a.account_type, ownertype: a.owner_type, opening_balance: a.opening_balance || 0 }]);
         if (e3) { errs.push(e3.message); throw new Error("Auto-Heal Insert Failed: " + errs.join(" | ")); }
+        return id;
     },
 
     async safeInsertLedger(l) {
@@ -286,45 +294,52 @@ window.db = {
 
         let { error: e3 } = await this.client.from('ledgers').insert([{ id, name: l.name, groupid: l.group_id }]);
         if (e3) { errs.push(e3.message); throw new Error("Auto-Heal Insert Failed: " + errs.join(" | ")); }
+        return id;
     },
 
     async addAccount(d) { 
         if (!this.client) return;
-        await this.safeInsertAccount({
+        const id = await this.safeInsertAccount({
             name: d.name,
             account_type: d.account_type,
             owner_type: d.owner_type,
             opening_balance: parseFloat(d.opening_balance) || 0
         });
+        if (id) this.postToGoogleSheets('account', 'CREATE', { id, ...d });
         await this.syncMasterData(); 
     },
 
     async addLedger(d)  { 
-        await this.safeInsertLedger(d);
+        const id = await this.safeInsertLedger(d);
+        if (id) this.postToGoogleSheets('ledger', 'CREATE', { id, ...d });
         await this.syncMasterData(); 
     },
     async updateAccount(id, payload) {
         if (!this.client) return;
         const { error } = await this.client.from('money_accounts').update(payload).eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets('account', String(payload.name).startsWith('[ARCHIVED]') ? 'ARCHIVE' : 'EDIT', { id, ...payload });
         await this.syncMasterData();
     },
     async deleteAccount(id) {
         if (!this.client) return;
         const { error } = await this.client.from('money_accounts').delete().eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets('account', 'DELETE', { id });
         await this.syncMasterData();
     },
     async updateLedger(id, payload) {
         if (!this.client) return;
         const { error } = await this.client.from('ledgers').update(payload).eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets('ledger', String(payload.name).startsWith('[ARCHIVED]') ? 'ARCHIVE' : 'EDIT', { id, ...payload });
         await this.syncMasterData();
     },
     async deleteLedger(id) {
         if (!this.client) return;
         const { error } = await this.client.from('ledgers').delete().eq('id', id);
         if (error) throw error;
+        this.postToGoogleSheets('ledger', 'DELETE', { id });
         await this.syncMasterData();
     },
     async updateGroup(id, payload) {
@@ -356,6 +371,28 @@ window.db = {
         this.settings = s; 
         const { error } = await this.client.from('app_settings').upsert({ key: 'business_config', value: s }); 
         if (error) throw error;
+    },
+
+    async postToGoogleSheets(recordType, actionType, payload) {
+        if (!this.settings?.gsBackupEnabled || !this.settings?.gsWebhookUrl) return;
+        try {
+            const data = {
+                app_record_id: payload.id || crypto.randomUUID(),
+                action_type: actionType,
+                timestamp: new Date().toISOString(),
+                record_type: recordType,
+                user: this.state.currentUser,
+                ...payload
+            };
+            fetch(this.settings.gsWebhookUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(data)
+            }).catch(e => console.warn('[GS Backup Network Error]', e));
+        } catch (e) {
+            console.warn('[GS Backup Error]', e);
+        }
     },
 
     getDatePreset(p) {

@@ -767,16 +767,71 @@ window.ui = {
     renderSettings(c) {
         const s = window.db.settings;
         c.innerHTML = `<div class="settings-container"><div class="report-card"><h3>Config</h3>
-            <div class="form-group"><label>Brand</label><input id="s-biz" value="${s.businessName}"></div>
-            <div class="form-group"><label>P1 Name</label><input id="s-p1" value="${s.p1Name}"></div>
-            <div class="form-group"><label>P2 Name</label><input id="s-p2" value="${s.p2Name}"></div>
-            <div class="form-group"><label>P1 %</label><input type="number" id="s-pct" value="${s.profitSharing}"></div>
+            <div class="form-group"><label>Brand</label><input id="s-biz" value="${s.businessName||''}"></div>
+            <div class="form-group"><label>P1 Name</label><input id="s-p1" value="${s.p1Name||''}"></div>
+            <div class="form-group"><label>P2 Name</label><input id="s-p2" value="${s.p2Name||''}"></div>
+            <div class="form-group"><label>P1 %</label><input type="number" id="s-pct" value="${s.profitSharing||''}"></div>
             <button onclick="ui.updateConfig()" class="btn-primary">Apply</button>
-        </div><button class="btn-cancel" style="margin-top:2rem;background:var(--rd);color:white" onclick="window.auth.logout()">Logout</button></div>`;
+        </div>
+        
+        <div class="report-card" style="margin-top:2rem">
+            <h3>Google Sheets Backup</h3>
+            <div class="form-group">
+                <label>Webhook URL</label>
+                <input id="s-gs-url" value="${s.gsWebhookUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+            <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem;">
+                <label style="cursor:pointer; display:flex; align-items:center; gap:0.5rem; color: #fff;">
+                    <input type="checkbox" id="s-gs-enabled" ${s.gsBackupEnabled ? 'checked' : ''} style="width:auto;"> Enable Automated Backup
+                </label>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+                <button onclick="ui.updateConfig()" class="btn-primary">Save Settings</button>
+                <button onclick="ui.testGSBackup()" class="btn-primary" style="background:var(--surf2);color:var(--t);border:1px solid var(--br)">Test Connection</button>
+            </div>
+        </div>
+
+        <button class="btn-cancel" style="margin-top:2rem;background:var(--rd);color:white" onclick="window.auth.logout()">Logout</button></div>`;
+    },
+
+    async testGSBackup() {
+        const url = document.getElementById('s-gs-url').value;
+        if (!url) return alert('Please enter a Webhook URL first.');
+        try {
+            const data = {
+                app_record_id: 'test-ping-1234',
+                action_type: 'TEST',
+                timestamp: new Date().toISOString(),
+                record_type: 'TestPing',
+                message: 'Hello from Partner Portal'
+            };
+            fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(data)
+            }).then(() => {
+                alert('Test payload sent! Check your Google Sheet to verify.');
+            }).catch(e => {
+                alert('Fetch failed: ' + e.message);
+            });
+        } catch(e) {
+            alert('Error: ' + e.message);
+        }
     },
 
     async updateConfig() {
-        const s = { businessName: document.getElementById('s-biz').value, p1Name: document.getElementById('s-p1').value, p2Name: document.getElementById('s-p2').value, profitSharing: parseFloat(document.getElementById('s-pct').value), currency: '₹' };
+        const urlEl = document.getElementById('s-gs-url');
+        const enableEl = document.getElementById('s-gs-enabled');
+        const s = { 
+            businessName: document.getElementById('s-biz').value, 
+            p1Name: document.getElementById('s-p1').value, 
+            p2Name: document.getElementById('s-p2').value, 
+            profitSharing: parseFloat(document.getElementById('s-pct').value), 
+            currency: '₹',
+            gsWebhookUrl: urlEl ? urlEl.value : window.db.settings.gsWebhookUrl,
+            gsBackupEnabled: enableEl ? enableEl.checked : window.db.settings.gsBackupEnabled
+        };
         await window.db.saveSettings(s);
         location.reload();
     },
