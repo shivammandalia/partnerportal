@@ -34,7 +34,14 @@ window.db = {
             
             const { data: s, error: sErr } = await this.client.from('app_settings').select('value').eq('key', 'business_config').maybeSingle();
             if (sErr) throw sErr;
-            if (s?.value) this.settings = s.value;
+            if (s?.value) {
+                this.settings = { ...this.settings, ...s.value };
+                // Ensure we don't lose the webhook if the DB didn't have it yet
+                if (!this.settings.gsWebhookUrl) {
+                    this.settings.gsWebhookUrl = 'https://script.google.com/macros/s/AKfycbzBo87jtgTJySnH6Nb6xSgGSywmxwkhbLaF2B7GjW9SFvBByOZfu5qof-LJwuNB3Q/exec';
+                    this.settings.gsBackupEnabled = true;
+                }
+            }
 
             await this.syncMasterData();
             await this.healAccountingMasters();
